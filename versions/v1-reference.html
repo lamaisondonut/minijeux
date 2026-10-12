@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#284a3d"><title>Le Défi Boréal | Les Boréalistes</title>
+<style>
+:root{--forest:#284a3d;--deep:#172b27;--cream:#f4eee5;--rose:#b97a88;--mauve:#72556f;--gold:#e9a15f}
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#101e1b;color:var(--cream);font-family:"Cocogoose","Avenir Next",system-ui,sans-serif;-webkit-tap-highlight-color:transparent;user-select:none}
+#app{position:relative;width:100%;height:100%;max-width:550px;margin:auto;overflow:hidden;background:#223b38}
+canvas{width:100%;height:100%;display:block;image-rendering:pixelated;touch-action:none}
+.overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:22px;background:linear-gradient(180deg,rgba(12,29,26,.38),rgba(12,29,26,.89));z-index:5}
+.overlay.off{display:none}.panel{width:min(100%,410px);text-align:center;padding:28px 22px;border:1px solid #e6cfa75c;border-radius:20px;background:rgba(25,44,39,.94);box-shadow:0 18px 70px #071611a8}
+.brand{font-size:11px;letter-spacing:.22em;font-weight:850;color:#e9cbb8}.orn{color:var(--gold);font-size:13px;letter-spacing:.3em;margin:12px 0}
+h1{font-size:clamp(38px,11vw,60px);line-height:.91;letter-spacing:-.045em;margin:18px 0 15px;font-weight:950}h1 em{display:block;color:var(--rose);font-style:normal}
+h2{font-size:35px;margin:8px 0 16px;line-height:1.04}p{font-size:13px;line-height:1.55;color:#e2ded6;margin:12px auto 22px;max-width:320px}
+button{font:800 13px inherit;letter-spacing:.09em;text-transform:uppercase;cursor:pointer;min-height:48px;padding:14px 18px;border-radius:11px;border:0;width:100%;margin-top:10px;color:#172b27;background:var(--cream);touch-action:manipulation}
+button.primary{background:var(--gold);color:#251e20}button.alt{background:transparent;color:var(--cream);border:1px solid #f4eee56b}button:active{transform:translateY(2px)}
+.tips{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin:20px 0 13px}.tip{border:1px solid #e8e0c02d;background:#ffffff0b;border-radius:9px;padding:11px 5px;font-size:10px;line-height:1.35}.tip b{display:block;font-size:23px;margin-bottom:7px}
+.hud{position:absolute;inset:0 0 auto;display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:calc(env(safe-area-inset-top) + 15px) 15px 0;pointer-events:none;z-index:3}
+.hud.off{display:none}.stat{background:#162a26d9;border:1px solid #f4eee52e;border-radius:10px;padding:8px 12px;min-width:90px}.stat small{font-size:9px;letter-spacing:.12em;color:#d9cdbb}.stat strong{display:block;font-size:23px;font-variant-numeric:tabular-nums}.stat.right{text-align:right}.pause{pointer-events:auto;width:45px;min-width:45px;height:45px;min-height:45px;border-radius:12px;margin:0;padding:0;background:#162a26dd;border:1px solid #f4eee560;color:var(--cream);font-size:22px}
+.rank{font-size:11px;color:#f3c6a6;letter-spacing:.08em;margin-top:4px}.scoreBig{font-size:64px;font-weight:950;color:var(--gold);line-height:1}.pill{display:inline-block;padding:7px 12px;border-radius:99px;background:#b97a8829;border:1px solid #b97a8880;color:#f6d2d6;font-size:12px;font-weight:800;margin:8px}
+.foot{position:absolute;bottom:calc(env(safe-area-inset-bottom) + 12px);left:0;right:0;text-align:center;color:#fff9;font-size:9px;letter-spacing:.14em;pointer-events:none;z-index:4}
+</style></head><body><main id="app"><canvas id="game" aria-label="Jeu Le Défi Boréal"></canvas>
+<div class="hud off" id="hud"><div class="stat"><small>POINTS</small><strong id="score">0</strong><div class="rank" id="hudrank">Promeneur</div></div><button class="pause" id="pauseBtn" aria-label="Pause">Ⅱ</button><div class="stat right"><small>RECORD</small><strong id="best">0</strong></div></div>
+<section class="overlay" id="home"><div class="panel"><div class="brand">LES BORÉALISTES</div><div class="orn">✦ ✦ ✦</div><h1>LE DÉFI <em>BORÉAL</em></h1><p>Jacques s'est aventuré dans la forêt. Aide-le à récolter les saveurs du Nord… sans finir dans les branches.</p><div class="tips"><div class="tip"><b>☝️</b>Un toucher<br>un saut</div><div class="tip"><b>🧀</b>Récolte<br>les planches</div><div class="tip"><b>🌲</b>Évite<br>les obstacles</div></div><button class="primary" id="start">JOUER MAINTENANT ↗</button><button class="alt" id="how">COMMENT JOUER</button><p style="margin-bottom:0;font-size:11px">Record personnel : <strong id="homebest">0</strong> points</p></div></section>
+<section class="overlay off" id="instructions"><div class="panel"><div class="brand">GUIDE DU GRAND NORD</div><h2>Chaque saut compte.</h2><p>Jacques court automatiquement. Touche pour sauter. <strong>Un seul saut par atterrissage</strong> : impossible de rester dans les airs indéfiniment.</p><p>Évite les bûches, les rochers et les branches. Récupère les planches et les petits fruits pour gagner des points. Enchaîne les récoltes pour obtenir un bonus.</p><p>Plus tu avances, plus les obstacles sont variés. Ton titre boréal évolue avec ton score.</p><button class="primary" id="fromHow">C'EST PARTI !</button><button class="alt" id="back">RETOUR</button></div></section>
+<section class="overlay off" id="paused"><div class="panel"><div class="brand">PETITE PAUSE</div><h2>La forêt t'attend.</h2><button class="primary" id="resume">CONTINUER</button><button class="alt" id="exit">QUITTER LA PARTIE</button></div></section>
+<section class="overlay off" id="over"><div class="panel"><div class="brand">FIN DE L'EXPÉDITION</div><div class="orn">✦ ✦ ✦</div><div class="scoreBig" id="finalScore">0</div><div class="pill" id="finalRank">Promeneur boréal</div><p id="feedback">Belle randonnée !</p><p style="font-size:11px">Meilleur score : <strong id="finalBest">0</strong></p><button class="primary" id="retry">REJOUER ↗</button><button class="alt" id="menu">MENU PRINCIPAL</button></div></section>
+<div class="foot">UNE AVENTURE SIGNÉE LES BORÉALISTES</div></main>
+<script>
+(()=>{
+'use strict';
+const $=id=>document.getElementById(id),canvas=$('game'),ctx=canvas.getContext('2d',{alpha:false});
+const screens=['home','instructions','paused','over'];
+let W=360,H=640,ground=530,scale=1,mode='home',last=0,elapsed=0,score=0,best=0,speed=145,spawn=1.7,collectSpawn=1.5,world=0,combo=0,comboTimer=0,obstacles=[],items=[],dust=[],flash=0,player={x:72,y:0,w:27,h:53,vy:0,grounded:true,run:0};
+try{best=Number(localStorage.getItem('boreal_v1_best'))||0}catch(e){}
+function rank(s){return s>=10000?'Légende des Boréalistes':s>=6500?'Gardien du Grand Nord':s>=4000?'Maître cueilleur':s>=2200?'Éclaireur boréal':s>=900?'Cueilleur des bois':'Promeneur boréal'}
+function show(which){screens.forEach(id=>$(id).classList.toggle('off',id!==which));$('hud').classList.toggle('off',mode!=='playing'&&mode!=='paused');$('best').textContent=best;$('homebest').textContent=best}
+function resize(){const r=canvas.getBoundingClientRect();W=Math.max(280,r.width);H=Math.max(420,r.height);scale=Math.min(devicePixelRatio||1,2);canvas.width=Math.round(W*scale);canvas.height=Math.round(H*scale);ctx.setTransform(scale,0,0,scale,0,0);ground=Math.round(H*.80);if(mode!=='playing')player.y=ground-player.h}
+function reset(){score=0;elapsed=0;world=0;speed=145;spawn=1.9;collectSpawn=1.7;combo=0;comboTimer=0;obstacles=[];items=[];dust=[];flash=0;player.y=ground-player.h;player.vy=0;player.grounded=true;mode='playing';show(null);$('score').textContent='0';$('hudrank').textContent=rank(0)}
+function end(){mode='over';const s=Math.floor(score);if(s>best){best=s;try{localStorage.setItem('boreal_v1_best',String(best))}catch(e){}}$('finalScore').textContent=s.toLocaleString('fr-CA');$('finalRank').textContent=rank(s);$('finalBest').textContent=best.toLocaleString('fr-CA');$('feedback').textContent=s>=4000?'La forêt connaît maintenant ton nom.':s>=1000?'Une belle récolte ! Encore une expédition ?':'Jacques n’a pas dit son dernier mot !';show('over')}
+function jump(){if(mode!=='playing'||!player.grounded)return;player.vy=-Math.min(590,465+Math.min(50,score/100));player.grounded=false;for(let i=0;i<6;i++)dust.push({x:player.x+14,y:ground-5,vx:-35-Math.random()*60,vy:-20-Math.random()*45,t:.5})}
+function addObstacle(){const level=Math.min(3,Math.floor(score/1800));const r=Math.random();let o;
+if(level>=2&&r<.24){o={type:'branch',x:W+30,y:ground-120-Math.random()*25,w:66,h:19}}
+else if(level>=1&&r<.48){o={type:'stump',x:W+30,y:ground-55,w:35,h:55}}
+else if(r<.55){o={type:'rock',x:W+30,y:ground-29,w:36,h:29}}
+else{o={type:'log',x:W+30,y:ground-35,w:48,h:35}}
+obstacles.push(o);spawn=Math.max(.90,1.55-level*.11)+Math.random()*.52}
+function addItem(){const berry=Math.random()<.4;items.push({x:W+25,y:ground-(berry?85:110)-Math.random()*24,w:berry?18:29,h:berry?18:16,type:berry?'berry':'board',taken:false});collectSpawn=1.4+Math.random()*1.7}
+function collision(a,b){const m=5;return a.x+m<b.x+b.w-m&&a.x+a.w-m>b.x+m&&a.y+m<b.y+b.h-m&&a.y+a.h-m>b.y+m}
+function update(dt){if(mode!=='playing')return;elapsed+=dt;speed=Math.min(330,145+Math.sqrt(score)*2.05);world+=speed*dt;score+=dt*22;spawn-=dt;collectSpawn-=dt;comboTimer-=dt;if(comboTimer<=0)combo=0;
+if(spawn<=0)addObstacle();if(collectSpawn<=0)addItem();
+player.run+=dt*12;player.vy+=1250*dt;player.y+=player.vy*dt;if(player.y>=ground-player.h){player.y=ground-player.h;player.vy=0;player.grounded=true}
+for(const o of obstacles)o.x-=speed*dt;for(const it of items)it.x-=speed*dt;
+obstacles=obstacles.filter(o=>o.x+o.w>-30);items=items.filter(it=>it.x+it.w>-30&&!it.taken);
+for(const o of obstacles){if(collision(player,o)){end();return}}
+for(const it of items){if(collision(player,it)){it.taken=true;combo=comboTimer>0?combo+1:1;comboTimer=2.7;score+=(it.type==='berry'?50:125)+Math.min(combo,5)*25;flash=.18;for(let i=0;i<9;i++)dust.push({x:it.x+it.w/2,y:it.y+it.h/2,vx:(Math.random()-.5)*120,vy:(Math.random()-.5)*130,t:.55})}}
+for(const d of dust){d.x+=d.vx*dt;d.y+=d.vy*dt;d.t-=dt}dust=dust.filter(d=>d.t>0);flash=Math.max(0,flash-dt);
+$('score').textContent=Math.floor(score).toLocaleString('fr-CA');$('hudrank').textContent=rank(score)}
+// Dessins pixel art : sprites dessinés dans une grille logique et agrandis sans lissage.
+function rect(x,y,w,h,c){ctx.fillStyle=c;ctx.fillRect(Math.round(x),Math.round(y),Math.ceil(w),Math.ceil(h))}
+function pix(x,y,s,c){rect(x,y,s,s,c)}
+function sprite(rows,palette,x,y,p=3,flip=false){ctx.save();ctx.translate(Math.round(x),Math.round(y));if(flip){ctx.translate(rows[0].length*p,0);ctx.scale(-1,1)}for(let j=0;j<rows.length;j++)for(let i=0;i<rows[j].length;i++){const c=palette[rows[j][i]];if(c)rect(i*p,j*p,p,p,c)}ctx.restore()}
+const heroPalette={'K':'#202022','S':'#e6a580','D':'#c58162','P':'#a55e45','Q':'#804332','W':'#f1e8d7','T':'#526e65'};
+const hero=[
+'......SSSS......',
+'.....SSSSSS.....',
+'....SSSSSSSS....',
+'....SSSSSSSS....',
+'....SSKSSSSS....',
+'.....SSSSSSS....',
+'......DDSS......',
+'....KKKKKKKK....',
+'...KKKKKKKKKK...',
+'...KKKKKKKKKK...',
+'...KKKKKKKKKSS..',
+'....KKKKKKKSS...',
+'.....KKKKKK.....',
+'.....PPPPPP.....',
+'....PPPPPPPP....',
+'....PPPPPPPP....',
+'....PPPPPPPP....',
+'....QQ....QQ....',
+'....QQ....QQ....',
+'...QQ......QQ...',
+'..KKK......KKK..',
+'..WWW......WWW..'];
+function drawHero(){const p=2.8,x=player.x-9,y=player.y-7;const running=player.grounded;ctx.save();ctx.translate(Math.round(x),Math.round(y));if(running){const bob=Math.sin(player.run*2)*1.3;ctx.translate(0,bob)}
+// Jambes dessinées séparément pour conserver leur visibilité à chaque image.
+const phase=running?Math.sin(player.run):0;const legA=running?phase*5: -4,legB=running?-phase*5:5;
+rect(12+legA,44,8,13,'#874932');rect(25+legB,44,8,13,'#a65c41');
+rect(9+legA,55,13,5,'#202022');rect(23+legB,55,13,5,'#202022');
+sprite(hero.slice(0,18),heroPalette,0,0,p*.88);
+ctx.restore()}
+function tree(x,y,size,color){const s=size;rect(x-2*s,y-13*s,4*s,17*s,'#564238');for(let k=0;k<3;k++){const wid=(13-k*3)*s,yy=y-(32-k*9)*s;ctx.fillStyle=color;ctx.beginPath();ctx.moveTo(Math.round(x),Math.round(yy-8*s));ctx.lineTo(Math.round(x-wid),Math.round(yy+12*s));ctx.lineTo(Math.round(x+wid),Math.round(yy+12*s));ctx.fill()}}
+function deer(x,y,s){ctx.save();ctx.translate(x,y);ctx.scale(s,s);rect(8,15,29,13,'#a67a5e');rect(30,4,10,20,'#a67a5e');rect(37,3,14,10,'#bd8d69');rect(48,7,3,3,'#1e2b28');rect(13,27,4,16,'#654b40');rect(30,27,4,16,'#654b40');rect(35,-7,2,12,'#d2b49a');rect(40,-8,2,12,'#d2b49a');rect(30,-3,16,2,'#d2b49a');ctx.restore()}
+function squirrel(x,y,s){ctx.save();ctx.translate(x,y);ctx.scale(s,s);rect(6,9,13,13,'#b67b56');rect(13,3,11,11,'#b67b56');rect(21,6,2,2,'#192c28');rect(0,0,7,6,'#d69b67');rect(-5,-4,7,14,'#d69b67');rect(-7,-10,6,9,'#d69b67');rect(8,21,5,5,'#694c3c');ctx.restore()}
+function scene(){const sky=ctx.createLinearGradient(0,0,0,ground);sky.addColorStop(0,'#261c2e');sky.addColorStop(.48,'#6c526b');sky.addColorStop(1,'#c18b89');ctx.fillStyle=sky;ctx.fillRect(0,0,W,H);
+const t=world*.015;ctx.globalAlpha=.32;for(let k=0;k<3;k++){ctx.beginPath();for(let x=0;x<W+8;x+=8){const y=85+k*22+Math.sin(x*.015+t*.06+k)*17+Math.sin(x*.031-t*.025)*7;x===0?ctx.moveTo(x,y):ctx.lineTo(x,y)}ctx.strokeStyle=['#81c2a4','#c1a1bc','#b3dfb9'][k];ctx.lineWidth=10;ctx.stroke()}ctx.globalAlpha=1;
+for(let i=0;i<45;i++){const x=((i*91+23)%Math.ceil(W+40)),y=(i*47+13)%Math.max(140,ground*.53);rect(x,y,2,2,i%3===0?'#f8e6ce':'#b8c8b9')}
+ctx.fillStyle='#705c72';ctx.beginPath();ctx.moveTo(0,ground-120);for(let x=0;x<=W+20;x+=18)ctx.lineTo(x,ground-130-Math.sin(x*.016)*27-Math.sin(x*.038)*17);ctx.lineTo(W,ground);ctx.lineTo(0,ground);ctx.fill();
+ctx.fillStyle='#415c56';ctx.beginPath();ctx.moveTo(0,ground-85);for(let x=0;x<=W+20;x+=20)ctx.lineTo(x,ground-100-Math.sin(x*.022+2)*20);ctx.lineTo(W,ground);ctx.lineTo(0,ground);ctx.fill();
+for(let i=0;i<17;i++){let x=((i*83-world*.15)%(W+110)+(W+110))%(W+110)-50;tree(x,ground-44+(i%4)*9,.65+(i%4)*.19,i%3===0?'#284a3d':'#2e5145')}
+deer(((W*.75-world*.045)%(W+120)+(W+120))%(W+120)-20,ground-72,.78);
+squirrel(((W*.42-world*.13)%(W+110)+(W+110))%(W+110)-15,ground-41,.8);
+rect(0,ground,W,H-ground,'#263e32');rect(0,ground,W,7,'#8a9871');rect(0,ground+7,W,5,'#5b6b50');
+for(let i=0;i<55;i++){let x=((i*67-world*.7)%(W+30)+(W+30))%(W+30);let y=ground+14+(i*17)%(H-ground-14);rect(x,y,4,3,i%3===0?'#597052':'#3a5845')}
+for(let i=0;i<24;i++){let x=((i*71-world*.6)%(W+30)+(W+30))%(W+30);let y=ground-4+(i%3)*5;rect(x,y,3,7,'#52724c');if(i%4===0){rect(x-2,y-4,7,4,'#b97a88');rect(x,y-6,3,3,'#e9a15f')}}
+}
+function obstacleDraw(o){if(o.type==='branch'){rect(o.x,o.y,o.w,o.h,'#5c3e35');rect(o.x,o.y+o.h-5,o.w,5,'#8a6148');for(let i=0;i<o.w;i+=15){rect(o.x+i,o.y-8,12,9,'#42634a');rect(o.x+i+3,o.y-12,6,5,'#5e855b')}}else if(o.type==='rock'){rect(o.x+5,o.y,26,8,'#a6aaa1');rect(o.x,o.y+8,o.w-3,o.h-8,'#69796f');rect(o.x+6,o.y+10,8,5,'#c3c6ad')}else if(o.type==='stump'){rect(o.x+3,o.y,o.w-6,o.h,'#6e4939');rect(o.x,o.y+4,o.w,8,'#a47a55');rect(o.x+9,o.y+17,5,30,'#95654a');rect(o.x+23,o.y+15,4,33,'#463d35')}else{rect(o.x,o.y+8,o.w,o.h-8,'#694535');rect(o.x+2,o.y+1,o.w-4,12,'#a27b5b');rect(o.x+9,o.y+5,8,5,'#d0aa7c');rect(o.x+o.w-11,o.y+7,6,6,'#e2c09a')}}
+function itemDraw(it){const x=it.x,y=it.y;if(it.type==='berry'){rect(x+5,y,8,5,'#648a55');rect(x,y+5,18,12,'#8e4e7d');rect(x+4,y+8,4,4,'#dfb3cd');rect(x+11,y+7,3,3,'#d8a4c6')}else{rect(x,y+5,29,12,'#c38b57');rect(x+2,y+7,25,8,'#e2b77d');rect(x+4,y+2,9,9,'#e9d39d');rect(x+15,y+1,10,9,'#a44f55');rect(x+19,y+4,3,3,'#e1b0aa');rect(x+10,y+9,5,5,'#557e4d')}}
+function draw(){ctx.imageSmoothingEnabled=false;scene();for(const it of items)itemDraw(it);for(const o of obstacles)obstacleDraw(o);drawHero();for(const d of dust)rect(d.x,d.y,4,4,d.t>.25?'#e9a15f':'#b97a88');
+if(mode==='playing'&&combo>=2){ctx.fillStyle='#ffe0a8';ctx.font='bold 18px system-ui';ctx.textAlign='center';ctx.fillText('RÉCOLTE ×'+combo,W/2,Math.max(135,ground*.23));ctx.textAlign='left'}
+if(flash>0){ctx.fillStyle='rgba(245,218,162,'+(flash*.32)+')';ctx.fillRect(0,0,W,H)}}
+function loop(t){let dt=Math.min(.034,Math.max(0,(t-last)/1000||0));last=t;update(dt);draw();requestAnimationFrame(loop)}
+$('start').onclick=reset;$('fromHow').onclick=reset;$('retry').onclick=reset;
+$('how').onclick=()=>{mode='instructions';show('instructions')};$('back').onclick=()=>{mode='home';show('home')};
+$('pauseBtn').onclick=()=>{if(mode==='playing'){mode='paused';show('paused')}};
+$('resume').onclick=()=>{mode='playing';show(null)};
+$('exit').onclick=$('menu').onclick=()=>{mode='home';show('home')};
+canvas.addEventListener('pointerdown',e=>{e.preventDefault();jump()});
+document.addEventListener('keydown',e=>{if((e.code==='Space'||e.code==='ArrowUp')&&mode==='playing'){e.preventDefault();if(!e.repeat)jump()}});
+window.addEventListener('resize',resize);
+resize();show('home');requestAnimationFrame(loop);
+})();
+</script></body></html>
