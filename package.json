@@ -1,11 +1,14 @@
 {
   "name": "le-defi-boreal",
-  "version": "2.1.0",
+  "version": "3.0.0",
   "private": true,
-  "description": "Stabilisation du moteur V2 existant des Boréalistes",
+  "description": "Le Défi Boréal — V3 sprites, forêt et mécaniques",
   "scripts": {
     "dev": "python3 -m http.server 8000 --bind 127.0.0.1",
-    "test": "node tests/browser.cjs"
+    "test": "node tests/browser.cjs",
+    "test:v3": "node tests/mechanics-v3.cjs && node tests/v3-browser.cjs"
   },
-  "devDependencies": {"playwright": "1.62.1"}
+  "devDependencies": {
+    "playwright": "1.62.1"
+  }
 }

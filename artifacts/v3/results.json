@@ -1,0 +1,87 @@
+{
+  "checks": 56,
+  "results": [
+    "menu V3 et ressources prêts",
+    "jeu activé après chargement des sprites",
+    "silhouettes complètes préservées au-delà de la grille indicative",
+    "états de sprites disponibles",
+    "instructions conservées",
+    "partie réelle avance dans Chromium",
+    "personnage affiché depuis un vrai fichier image chargé",
+    "animation de course change réellement de frame",
+    "pause bloque le score",
+    "reprise de la partie",
+    "retour au menu",
+    "partie jouable en compact",
+    "bouton de jeu accessible en compact",
+    "partie jouable en landscape",
+    "bouton de jeu accessible en landscape",
+    "mesure du rendu dans Chromium terminée",
+    "aucune erreur JavaScript sur les pages réelles",
+    "V3 autonome sans appel backend ou service de récompenses",
+    "neuf plans de décor ont des vitesses distinctes",
+    "les images de premier plan défilent réellement plus vite que les arbres lointains",
+    "chaque image paysage est entièrement repeinte sans traces précédentes",
+    "chaque état demandé possède plusieurs frames PNG réellement dessinées",
+    "vitesse initiale supérieure à la V2.1",
+    "touche maintenue ne déclenche pas deux sauts",
+    "clavier déclenche le second saut",
+    "commande tactile déclenche le premier saut",
+    "commande tactile déclenche le double saut",
+    "premier saut conservé",
+    "double saut conservé",
+    "troisième saut refusé",
+    "course, saut, double saut et descente emploient leurs sprites",
+    "atterrissage recharge les deux sauts",
+    "collectible et bonus conservés",
+    "combo conservé",
+    "expiration du combo",
+    "un saut franchit un obstacle log placé à temps",
+    "un saut franchit un obstacle rock placé à temps",
+    "un saut franchit un obstacle stump placé à temps",
+    "souche haute demande un double saut",
+    "double saut franchit la souche haute",
+    "branche haute franchissable en restant au sol",
+    "collision termine la partie",
+    "sprite de collision utilisé par le jeu",
+    "redémarrage propre",
+    "six titres et seuils conservés",
+    "score indépendant de la fréquence de simulation",
+    "physique indépendante de la fréquence de simulation",
+    "hauteur du saut conservée après rotation",
+    "obstacles et collectibles restent alignés après rotation",
+    "perte de focus met en pause",
+    "record personnel persisté après rechargement",
+    "record local invalide rejeté",
+    "aucune erreur JavaScript dans les scénarios déterministes",
+    "ressource manquante bloque le démarrage",
+    "erreur graphique visible et explicite",
+    "rechargement rétablit les ressources et le jeu"
+  ],
+  "chromiumVersion": "154.0.8037.57",
+  "viewports": [
+    {
+      "width": 390,
+      "height": 844
+    },
+    {
+      "width": 320,
+      "height": 568
+    },
+    {
+      "width": 844,
+      "height": 390
+    }
+  ],
+  "renderMetrics": {
+    "samples": 90,
+    "medianFrameMs": 16.699999999999818,
+    "p95FrameMs": 16.800000000000182,
+    "observedFps": 59.99999999999999
+  },
+  "limitations": [
+    "Chromium headless; aucun téléphone physique testé.",
+    "Les captures de sauts et collision contrôlent le temps de simulation du vrai moteur.",
+    "Le débit observé ne garantit pas les performances sur mobile."
+  ]
+}
