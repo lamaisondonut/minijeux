@@ -1,6 +1,8 @@
 """Package frontend and complete source without credentials or development caches."""
 from pathlib import Path
 import zipfile
+import subprocess
+import sys
 
 root = Path(__file__).resolve().parents[1]
 dist = root / 'dist'
@@ -14,10 +16,11 @@ def write_archive(target, files):
         assert archive.testzip() is None, 'Corrupt ZIP'
     print(target.name, target.stat().st_size, 'bytes')
 
-frontend = root / 'v3'
-write_archive(dist / 'defi-boreal-v3-jouable.zip', [
-    (p, p.relative_to(frontend)) for p in sorted(frontend.rglob('*')) if p.is_file()
-])
+subprocess.run([sys.executable, str(root / 'scripts/build-standalone.py')], check=True)
+standalone = root / 'downloads/defi-boreal-v3-autonome.html'
+# One-file index works even when the OS opens an isolated file from a ZIP.
+write_archive(dist / 'defi-boreal-v3-jouable.zip', [(standalone, 'index.html')])
+write_archive(root / 'downloads/defi-boreal-v3-autonome.zip', [(standalone, 'index.html')])
 files = []
 # Explicit project members: no .git, uploads, credential files, caches or previous ZIPs.
 for name in ['README.md', 'CHANGELOG.md', 'package.json', 'package-lock.json', '.gitignore']:
@@ -26,4 +29,5 @@ for directory in ['current', 'v3', 'versions', 'docs', 'tests', 'scripts', 'arti
     for p in sorted((root / directory).rglob('*')):
         if p.is_file():
             files.append((p, p.relative_to(root)))
+files.append((standalone, 'downloads/defi-boreal-v3-autonome.html'))
 write_archive(dist / 'defi-boreal-v3-projet.zip', files)

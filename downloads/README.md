@@ -1,11 +1,13 @@
-# Livraison V3
+# Essayer Le Défi Boréal
 
-Ces fichiers sont préparés pour être récupérés depuis une branche GitHub après autorisation de publication. Un lien `/workspace/...` dans le chat désigne un fichier interne, pas un téléchargement partagé.
+1. Télécharger `defi-boreal-v3-autonome.zip`.
+2. Extraire tout le ZIP.
+3. Ouvrir son unique `index.html` dans Chrome, Edge ou Safari sur ordinateur.
 
-- `defi-boreal-v3-jouable.zip` : frontend complet, index.html à la racine ; extraire tout le ZIP et servir son contenu sur un hébergement statique, par exemple Netlify.
-- `defi-boreal-v3-projet.zip` : projet complet avec anciennes versions, docs, tests et captures.
-- `jeu-livraison.jpg` : nouvelle capture JPEG prise dans Chromium pendant une vraie partie, sans retouche ni élément d'interface masqué.
+Tout est intégré dans le HTML : aucune installation, aucun serveur et aucun fichier image séparé ne sont nécessaires. Le fichier `defi-boreal-v3-autonome.html` peut également être téléchargé et ouvert directement. Si GitHub affiche son code, utiliser Enregistrer le lien sous ou passer par le ZIP.
 
-Les captures originales PNG sont RGB opaques et colorées ; le jeu sur HTTP charge 24 frames, sans erreur JavaScript. Le problème signalé concerne l'affichage des captures dans le chat et les liens internes. Aucun défaut nouveau du moteur n'a été confirmé par ce signalement.
+Un aperçu HTML dans une application de fichiers ou ZIP sur téléphone peut ne pas exécuter JavaScript. Pour un lien jouable sur téléphone, héberger le contenu du ZIP sur Netlify ou un hébergement statique équivalent. Aucun site public jouable n’est encore déployé.
 
-Aucun fichier de secrets, node_modules ou métadonnée Git n'est inclus dans les ZIP. Le jeu ne contient ni backend ni récompense active. Le dossier doit être publié sur une branche distincte, sans modifier main ; la préparation locale ne constitue pas une publication.
+`defi-boreal-v3-jouable.zip` contient aussi le même index autonome. `defi-boreal-v3-projet.zip` contient le projet et ses versions précédentes, docs, tests et captures.
+
+Les 24 contrôles du HTML autonome passent dans Chromium hors ligne sur origine opaque et en HTTP. La politique du navigateur géré bloque file:// : ce mode précis n’a pas été exécuté dans cet environnement. Aucun contournement de cette politique.

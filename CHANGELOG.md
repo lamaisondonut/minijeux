@@ -1,5 +1,14 @@
 # Journal des modifications
 
+## 3.0.1 — Livraison autonome
+
+- Correction du parcours d’essai : un seul HTML contient scripts, quatre PNG et animations JSON.
+- ZIP jouable réduit à un index autonome, sans chemins de ressources externes.
+- Sources modulaires conservées ; compilation reproductible depuis scripts/build-standalone.py.
+- Message plus utile lors d’une ouverture locale de la version modulaire.
+- 24 contrôles supplémentaires sur le HTML autonome, hors ligne avec origine opaque et en HTTP.
+- Aucun hébergement public activé ; ouverture file:// bloquée par la politique du navigateur géré, non contournée.
+
 ## 3.0 — Jacques, forêt et mécaniques
 
 - Nouvelle entrée v3/index.html ; V2.1 et anciennes références préservées.

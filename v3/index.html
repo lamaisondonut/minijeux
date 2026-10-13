@@ -45,7 +45,7 @@ button:focus-visible{outline:3px solid #e9a15f;outline-offset:3px}button:disable
 <section class="overlay off" id="instructions"><div class="panel"><div class="brand">GUIDE DU GRAND NORD</div><h2>Chaque saut compte.</h2><p>Jacques court automatiquement. Touche pour sauter. <strong>Deux sauts par atterrissage</strong> : le second saut permet d’atteindre les plats en hauteur.</p><p>Évite les bûches, les rochers et les branches. Récupère les planches et les petits fruits pour gagner des points. Enchaîne les récoltes pour obtenir un bonus.</p><p>Les grandes souches demandent deux sauts. Passe sous les branches sans sauter. Plus tu avances, plus les obstacles sont variés. Ton titre boréal évolue avec ton score.</p><button class="primary" id="fromHow">C'EST PARTI !</button><button class="alt" id="back">RETOUR</button></div></section>
 <section class="overlay off" id="paused"><div class="panel"><div class="brand">PETITE PAUSE</div><h2>La forêt t'attend.</h2><button class="primary" id="resume">CONTINUER</button><button class="alt" id="exit">QUITTER LA PARTIE</button></div></section>
 <section class="overlay off" id="over"><div class="panel"><div class="brand">FIN DE L'EXPÉDITION</div><div class="orn">✦ ✦ ✦</div><div class="scoreBig" id="finalScore">0</div><div class="pill" id="finalRank">Promeneur boréal</div><p id="feedback">Belle randonnée !</p><p style="font-size:11px">Meilleur score : <strong id="finalBest">0</strong></p><button class="primary" id="retry">REJOUER</button><button class="alt" id="menu">MENU PRINCIPAL</button></div></section>
-<section class="overlay off" id="assetError" role="alert"><div class="panel"><div class="brand">LE DÉFI BORÉAL</div><h2>La forêt se prépare.</h2><p>Les images du jeu n’ont pas pu être chargées. Vérifie ta connexion, puis réessaie.</p><button class="primary" id="reloadAssets">RÉESSAYER</button></div></section>
+<section class="overlay off" id="assetError" role="alert"><div class="panel"><div class="brand">LE DÉFI BORÉAL</div><h2>La forêt se prépare.</h2><p id="assetErrorMessage">Les images du jeu n’ont pas pu être chargées. Vérifie ta connexion, puis réessaie.</p><button class="primary" id="reloadAssets">RÉESSAYER</button></div></section>
 <div class="foot">UNE AVENTURE SIGNÉE LES BORÉALISTES</div></main>
 <script src="mechanics.js"></script>
 <script src="scenery.js"></script>
@@ -112,7 +112,7 @@ document.addEventListener('visibilitychange',()=>{if(document.hidden)pause()});
 window.addEventListener('blur',pause);
 $('reloadAssets').onclick=()=>location.reload();
 $('fromHow').disabled=true;
-Promise.all([window.JacquesSprites.ready,window.BorealScenery.ready]).then(()=>{assetsReady=true;canvas.dataset.ready='true';$('start').disabled=false;$('fromHow').disabled=false;$('start').textContent='JOUER →'}).catch(error=>{console.error('Chargement des images du jeu impossible',error);$('assetError').classList.remove('off')});
+Promise.all([window.JacquesSprites.ready,window.BorealScenery.ready]).then(()=>{assetsReady=true;canvas.dataset.ready='true';$('start').disabled=false;$('fromHow').disabled=false;$('start').textContent='JOUER →'}).catch(error=>{console.error('Chargement des images du jeu impossible',error);if(location.protocol==='file:')$('assetErrorMessage').textContent='Cette version utilise des fichiers séparés. Pour jouer sans installation, ouvre la version autonome du Défi Boréal. Tu peux aussi ouvrir le jeu depuis son site Web.';$('assetError').classList.remove('off')});
 resize();show('home');requestAnimationFrame(loop);
 })();
 </script></body></html>

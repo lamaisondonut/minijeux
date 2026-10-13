@@ -6,9 +6,11 @@
 (() => {
   'use strict';
   const scriptURL = document.currentScript && document.currentScript.src;
-  const assetURL = new URL('assets/forest-panorama.png', scriptURL || location.href).href;
-  const landscapeAssetURL = new URL('assets/forest-landscape.png', scriptURL || location.href).href;
-  const treesAssetURL = new URL('assets/forest-trees.png', scriptURL || location.href).href;
+  const embedded=window.BorealEmbeddedAssets;
+  const imageURL=path=>embedded?.images[path]||new URL(path,scriptURL||document.baseURI).href;
+  const assetURL = imageURL('assets/forest-panorama.png');
+  const landscapeAssetURL = imageURL('assets/forest-landscape.png');
+  const treesAssetURL = imageURL('assets/forest-trees.png');
   const panorama = new Image();
   const landscape = new Image();
   const treeImage = new Image();

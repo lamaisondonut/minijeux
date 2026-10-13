@@ -1,12 +1,13 @@
 {
   "name": "le-defi-boreal",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "private": true,
   "description": "Le Défi Boréal — V3 sprites, forêt et mécaniques",
   "scripts": {
     "dev": "python3 -m http.server 8000 --bind 127.0.0.1",
     "test": "node tests/browser.cjs",
-    "test:v3": "node tests/mechanics-v3.cjs && node tests/v3-browser.cjs"
+    "test:v3": "node tests/mechanics-v3.cjs && node tests/v3-browser.cjs",
+    "test:standalone": "python3 scripts/build-standalone.py && node tests/standalone-v3.cjs"
   },
   "devDependencies": {
     "playwright": "1.62.1"

@@ -1,8 +1,16 @@
-# Le Défi Boréal — V3
+# Le Défi Boréal — V3.0.1
+
+## Essayer immédiatement
+
+Télécharger `downloads/defi-boreal-v3-autonome.zip`, extraire tout, puis ouvrir son unique `index.html` dans Chrome, Edge ou Safari sur ordinateur. On peut aussi télécharger `downloads/defi-boreal-v3-autonome.html` et l’ouvrir directement. Le code, les images et les animations sont tous intégrés ; aucun serveur ni téléchargement annexe requis. Les aperçus HTML de certaines applications mobiles n’exécutent pas les jeux ; sur téléphone, utiliser un vrai navigateur et de préférence un hébergement Web. Aucun site public jouable n’est encore déployé.
+
+Le test `npm run test:standalone` vérifie ce HTML hors ligne, sur origine opaque, et en HTTP. Le navigateur géré de cet environnement bloque file:// ; ce mode précis n’a pas été exécuté ici.
+
+## Projet et sources
 
 **Nouvelle version jouable : `v3/index.html`.** Voir [changements V3](docs/V3.md), [mécaniques](docs/MECHANICS-V3.md), [décor](docs/SCENERY-V3.md) et [tests](docs/TESTS-V3.md). La V2.1 reste disponible à `current/index.html`, sans modification.
 
-`npm run dev` sert le dépôt ; sélectionner `/v3/index.html`. `npm run test:v3` exécute les tests V3. Archive déployable : `dist/defi-boreal-v3-jouable.zip`. Archive complète : `dist/defi-boreal-v3-projet.zip`. Aucun backend ni récompense actif.
+`npm run dev` sert le dépôt ; sélectionner `/v3/index.html`. `npm run test:v3` exécute les tests V3. Archive déployable : `dist/defi-boreal-v3-jouable.zip`, désormais avec un seul index autonome. Archive complète : `dist/defi-boreal-v3-projet.zip`. Aucun backend ni récompense actif.
 
 ## Documentation de la V2.1 conservée
 

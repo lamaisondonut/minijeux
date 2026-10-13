@@ -1,0 +1,52 @@
+{
+  "checks": 24,
+  "results": [
+    "HTML chargé avec une origine opaque, sans serveur ni connexion",
+    "Images intégrées prêtes hors ligne et bouton Jouer activé",
+    "Les 24 silhouettes PNG de Jacques sont décodées",
+    "La forêt et ses neuf plans se chargent hors ligne",
+    "Instructions accessibles",
+    "La partie réelle avance et affiche un score hors ligne",
+    "Jacques est effectivement dessiné depuis le PNG intégré",
+    "Les frames de la course changent dans la partie réelle",
+    "Le véritable Canvas contient un décor coloré sur toute la scène échantillonnée",
+    "La pause bloque la progression",
+    "La reprise quitte la pause",
+    "Le menu principal reste accessible",
+    "Aucune requête HTTP, image externe ou métadonnée externe hors ligne",
+    "Aucune erreur JavaScript dans la partie autonome réelle",
+    "Le premier saut tactile fonctionne hors ligne",
+    "Le double saut tactile fonctionne hors ligne",
+    "Le troisième saut reste refusé",
+    "L’atterrissage recharge les deux sauts",
+    "Le saut au clavier fonctionne",
+    "Le double saut au clavier fonctionne",
+    "Les scénarios tactiles et clavier ne nécessitent aucun réseau et ne lèvent aucune erreur",
+    "Le fichier livré fonctionne aussi en HTTP",
+    "En HTTP seul le fichier HTML est demandé : aucun fichier dépendant",
+    "Aucune erreur JavaScript dans le fichier servi en HTTP"
+  ],
+  "chromiumVersion": "154.0.8037.57",
+  "viewport": {
+    "width": 390,
+    "height": 844
+  },
+  "canvasMetrics": {
+    "samples": 1196,
+    "colors": 1162,
+    "nonBlackRatio": 0.9665551839464883,
+    "meanLuminance": 66.76995418060191,
+    "canvasWidth": 390,
+    "canvasHeight": 844
+  },
+  "modes": [
+    "about:blank opaque origin, offline",
+    "HTTP served single file"
+  ],
+  "screenshot": "autonome-mobile.jpg",
+  "limitations": [
+    "Chromium headless Linux uniquement; aucun téléphone physique testé.",
+    "L’origine opaque simule les restrictions locales; l’ouverture depuis les apps Fichiers iOS/Android reste à vérifier.",
+    "La persistance du record est indisponible lorsque le navigateur refuse localStorage sur une origine opaque."
+  ]
+}

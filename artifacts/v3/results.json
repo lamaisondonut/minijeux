@@ -76,8 +76,8 @@
   "renderMetrics": {
     "samples": 90,
     "medianFrameMs": 16.699999999999818,
-    "p95FrameMs": 16.800000000000182,
-    "observedFps": 59.99999999999999
+    "p95FrameMs": 16.700000000000728,
+    "observedFps": 60.00400026668446
   },
   "limitations": [
     "Chromium headless; aucun téléphone physique testé.",

@@ -1,11 +1,12 @@
 /* Atlas original basé sur la maquette et la photo de Jacques. Aucun personnage de substitution. */
 (()=>{
 'use strict';
-const base=document.currentScript.src,sheet=new Image();
+const base=document.currentScript?.src||document.baseURI,sheet=new Image(),embedded=window.BorealEmbeddedAssets;
+const imageURL=path=>embedded?.images[path]||new URL(path,base).href;
 const stateFrames={},rates={},loops=new Set();
 let frames=[],scale=1,lastState='',stateStarted=0,lastTime=0;
-const imageReady=new Promise((resolve,reject)=>{sheet.onload=resolve;sheet.onerror=()=>reject(new Error('Atlas Jacques inaccessible'));sheet.src=new URL('assets/jacques-atlas.png',base).href});
-const metadataReady=fetch(new URL('assets/jacques-atlas.json',base)).then(r=>{if(!r.ok)throw new Error('Animations Jacques inaccessibles');return r.json()});
+const imageReady=new Promise((resolve,reject)=>{sheet.onload=resolve;sheet.onerror=()=>reject(new Error('Atlas Jacques inaccessible'));sheet.src=imageURL('assets/jacques-atlas.png')});
+const metadataReady=embedded?.jacques?Promise.resolve(embedded.jacques):fetch(new URL('assets/jacques-atlas.json',base)).then(r=>{if(!r.ok)throw new Error('Animations Jacques inaccessibles');return r.json()});
 const ready=Promise.all([imageReady,metadataReady]).then(([,metadata])=>{
  if(!sheet.naturalWidth||!sheet.naturalHeight)throw new Error('Atlas vide');
  for(const [name,animation] of Object.entries(metadata.animations)){stateFrames[name]=animation.frames;rates[name]=animation.fps;if(animation.loop)loops.add(name)}
