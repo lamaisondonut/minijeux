@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#284a3d"><title>Le Défi Boréal | Les Boréalistes</title>
+<meta name="theme-color" content="#284a3d"><title>Le Défi Boréal — Expéditions · Essai</title>
 <style>
 :root{--forest:#284a3d;--deep:#172b27;--cream:#f4eee5;--rose:#b97a88;--mauve:#72556f;--gold:#e9a15f}
 *{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#101e1b;color:var(--cream);font-family:"Cocogoose","Avenir Next",system-ui,sans-serif;-webkit-tap-highlight-color:transparent;user-select:none}
@@ -42,12 +42,13 @@ button:focus-visible{outline:3px solid #e9a15f;outline-offset:3px}button:disable
 </style></head><body><main id="app"><canvas id="game" aria-label="Jeu Le Défi Boréal"></canvas>
 <div class="hud off" id="hud"><div class="stat"><small>POINTS</small><strong id="score">0</strong><div class="rank" id="hudrank">Promeneur</div></div><button class="pause" id="pauseBtn" aria-label="Pause"><span class="pause-icon" aria-hidden="true"></span></button><div class="stat right"><small>RECORD</small><strong id="best">0</strong></div></div>
 <section class="overlay" id="home"><div class="panel"><div class="brand">LES BORÉALISTES</div><div class="orn">✦ ✦ ✦</div><h1>LE DÉFI <em>BORÉAL</em></h1><p>Collecte les plats. Évite les obstacles. Dépasse ton record.</p><div class="tips"><div class="tip"><b>☝️</b>Deux sauts<br>maximum</div><div class="tip"><b>🧀</b>Récolte<br>les planches</div><div class="tip"><b>🌲</b>Évite<br>les obstacles</div></div><button class="primary" id="start" disabled>PRÉPARATION…</button><button class="alt" id="how">COMMENT JOUER</button><p style="margin-bottom:0;font-size:11px">Record personnel : <strong id="homebest">0</strong> points</p></div></section>
-<section class="overlay off" id="instructions"><div class="panel"><div class="brand">GUIDE DU GRAND NORD</div><h2>Chaque saut compte.</h2><p>Jacques court automatiquement. Touche pour sauter. <strong>Deux sauts par atterrissage</strong> : le second saut permet d’atteindre les plats en hauteur.</p><p>Évite les bûches, les rochers et les branches. Récupère les planches et les petits fruits pour gagner des points. Enchaîne les récoltes pour obtenir un bonus.</p><p>Les grandes souches demandent deux sauts. Passe sous les branches sans sauter. Plus tu avances, plus les obstacles sont variés. Ton titre boréal évolue avec ton score.</p><button class="primary" id="fromHow">C'EST PARTI !</button><button class="alt" id="back">RETOUR</button></div></section>
+<section class="overlay off" id="instructions"><div class="panel"><div class="brand">GUIDE DU GRAND NORD</div><h2>Chaque saut compte.</h2><p>Jacques court automatiquement. Touche pour sauter. <strong>Deux sauts par atterrissage</strong> : le second saut permet d’atteindre les plats en hauteur.</p><p>Évite les bûches, les rochers et les branches. Récupère les planches et les petits fruits pour gagner des points. Enchaîne les récoltes pour obtenir un bonus.</p><p>Chaque sentier mène au refuge. Saute au bon moment pour récolter les planches et franchir les obstacles. Ton titre boréal évolue avec ton score.</p><button class="primary" id="fromHow">C'EST PARTI !</button><button class="alt" id="back">RETOUR</button></div></section>
 <section class="overlay off" id="paused"><div class="panel"><div class="brand">PETITE PAUSE</div><h2>La forêt t'attend.</h2><button class="primary" id="resume">CONTINUER</button><button class="alt" id="exit">QUITTER LA PARTIE</button></div></section>
 <section class="overlay off" id="over"><div class="panel"><div class="brand">FIN DE L'EXPÉDITION</div><div class="orn">✦ ✦ ✦</div><div class="scoreBig" id="finalScore">0</div><div class="pill" id="finalRank">Promeneur boréal</div><p id="feedback">Belle randonnée !</p><p style="font-size:11px">Meilleur score : <strong id="finalBest">0</strong></p><button class="primary" id="retry">REJOUER</button><button class="alt" id="menu">MENU PRINCIPAL</button></div></section>
 <section class="overlay off" id="assetError" role="alert"><div class="panel"><div class="brand">LE DÉFI BORÉAL</div><h2>La forêt se prépare.</h2><p id="assetErrorMessage">Les images du jeu n’ont pas pu être chargées. Vérifie ta connexion, puis réessaie.</p><button class="primary" id="reloadAssets">RÉESSAYER</button></div></section>
-<div class="foot">UNE AVENTURE SIGNÉE LES BORÉALISTES</div></main>
+<div class="foot" id="demoLabel">VERSION D’ESSAI · LES BORÉALISTES</div></main>
 <script src="mechanics.js"></script>
+<script src="expeditions.js"></script>
 <script src="scenery.js"></script>
 <script src="jacques.js"></script>
 <script>
@@ -55,56 +56,80 @@ button:focus-visible{outline:3px solid #e9a15f;outline-offset:3px}button:disable
 'use strict';
 const $=id=>document.getElementById(id),canvas=$('game'),ctx=canvas.getContext('2d',{alpha:false});
 $('reloadAssets').onclick=()=>location.reload();
-if(!window.BorealMechanics||!window.BorealScenery||!window.JacquesSprites){$('assetError').classList.remove('off');return}
+if(!window.BorealExpeditions||!window.BorealMechanics||!window.BorealScenery||!window.JacquesSprites){$('assetError').classList.remove('off');return}
 const screens=['home','instructions','paused','over'];
+const params=new URLSearchParams(location.search);
+const selectedRoute=['r0','r1','r2','r3'].includes(params.get('parcours'))?params.get('parcours'):['r0','r1','r2','r3'][crypto.getRandomValues(new Uint8Array(1))[0]%4];
+const quickTest=params.get('essai')==='rapide';
+let expedition=null,queuedJump=false,arrivalComplete=false,arrivalTimeout=0;
+if(quickTest)$('demoLabel').textContent='VERSION D’ESSAI ACCÉLÉRÉE · LES BORÉALISTES';
+const recordKey='boreal_expedition_demo_'+selectedRoute;
+const syncExpedition=()=>{const s=expedition;score=s.score;speed=s.speed;world=s.world;elapsed=s.elapsed;combo=s.combo;comboTimer=s.comboTimer;obstacles=s.obstacles;items=s.items;player=s.player;landingTimer=s.landingTimer;};
+
 // Paramètres du moteur existant ; les récompenses ne doivent jamais dépendre de ce score local.
 const CONFIG=Object.freeze({initialSpeed:315,maxSpeed:530,acceleration:2.8,gravity:1520,firstJump:-565,secondJump:-510,maxJumps:2,progressPointsPerSecond:22,comboSeconds:2.7,comboCap:5,comboBonus:25,fixedStep:1/120,maxFrameSeconds:.1,...window.BorealMechanics.config});
 let accumulator=0,assetsReady=false,animationTime=0,landingTimer=0,collisionTimer=0;
 let random=window.BorealMechanics.rng(1);
 let W=360,H=640,ground=530,scale=1,mode='home',last=0,elapsed=0,score=0,best=0,speed=CONFIG.initialSpeed,spawn=1.7,collectSpawn=1.5,world=0,combo=0,comboTimer=0,obstacles=[],items=[],dust=[],flash=0,player={x:72,y:0,w:CONFIG.playerWidth,h:CONFIG.playerHeight,vy:0,grounded:true,jumps:0,run:0};
-try{const stored=Number(localStorage.getItem('boreal_v1_best'));best=Number.isSafeInteger(stored)&&stored>=0?stored:0}catch(e){}
+try{const stored=Number(localStorage.getItem(recordKey));best=Number.isSafeInteger(stored)&&stored>=0?stored:0}catch(e){}
 function rank(s){return s>=10000?'Légende des Boréalistes':s>=6500?'Gardien du Grand Nord':s>=4000?'Maître cueilleur':s>=2200?'Éclaireur boréal':s>=900?'Cueilleur des bois':'Promeneur boréal'}
 function show(which){screens.forEach(id=>$(id).classList.toggle('off',id!==which));$('hud').classList.toggle('off',mode!=='playing'&&mode!=='paused');$('best').textContent=best;$('homebest').textContent=best}
-function resize(){const previousGround=ground,r=canvas.getBoundingClientRect();W=Math.max(1,r.width);H=Math.max(1,r.height);scale=Math.min(devicePixelRatio||1,2);canvas.width=Math.round(W*scale);canvas.height=Math.round(H*scale);ctx.setTransform(scale,0,0,scale,0,0);ground=Math.round(H*.80);const delta=ground-previousGround;player.y+=delta;for(const entity of [...obstacles,...items,...dust])entity.y+=delta;if(player.grounded)player.y=ground-player.h} 
-function reset(){if(!assetsReady)return;random=window.BorealMechanics.rng(crypto.getRandomValues(new Uint32Array(1))[0]);landingTimer=0;collisionTimer=0;score=0;elapsed=0;world=0;accumulator=0;last=0;speed=CONFIG.initialSpeed;spawn=1.9;collectSpawn=1.7;combo=0;comboTimer=0;obstacles=[];items=[];dust=[];flash=0;player.y=ground-player.h;player.vy=0;player.grounded=true;player.jumps=0;mode='playing';show(null);$('score').textContent='0';$('hudrank').textContent=rank(0)}
-function end(){collisionTimer=.45;mode='over';const s=Math.floor(score);if(s>best){best=s;try{localStorage.setItem('boreal_v1_best',String(best))}catch(e){}}$('finalScore').textContent=s.toLocaleString('fr-CA');$('finalRank').textContent=rank(s);$('finalBest').textContent=best.toLocaleString('fr-CA');$('feedback').textContent=s>=4000?'La forêt connaît maintenant ton nom.':s>=1000?'Une belle récolte ! Encore une expédition ?':'Jacques n’a pas dit son dernier mot !';show('over')}
-function jump(){if(mode!=='playing'||player.jumps>=CONFIG.maxJumps)return;player.vy=player.jumps===0?CONFIG.firstJump:CONFIG.secondJump;player.grounded=false;player.jumps++;for(let i=0;i<9;i++)dust.push({x:player.x+14,y:player.y+player.h,vx:-35-Math.random()*110,vy:-20-Math.random()*85,t:.55})}
+function resize(){const previousGround=ground,r=canvas.getBoundingClientRect();W=Math.max(1,r.width);H=Math.max(1,r.height);scale=Math.min(devicePixelRatio||1,2);canvas.width=Math.round(W*scale);canvas.height=Math.round(H*scale);ctx.setTransform(scale,0,0,scale,0,0);ground=Math.round(H*.80);const delta=ground-previousGround;if(expedition){expedition.ground=ground;expedition.width=Math.max(280,Math.round(W));expedition.height=Math.max(280,Math.round(H));}player.y+=delta;for(const entity of [...obstacles,...items,...dust])entity.y+=delta;if(player.grounded)player.y=ground-player.h} 
+function reset(){if(!assetsReady)return;clearTimeout(arrivalTimeout);arrivalComplete=false;queuedJump=false;collisionTimer=0;accumulator=0;last=0;dust=[];flash=0;
+expedition=window.BorealExpeditions.create(crypto.getRandomValues(new Uint32Array(1))[0],Math.max(280,Math.round(W)),Math.max(280,Math.round(H)),selectedRoute);syncExpedition();ground=expedition.ground;
+mode='playing';show(null);$('score').textContent='0';$('hudrank').textContent=rank(0);$('over').querySelector('.brand').textContent='FIN DE L’EXPÉDITION';$('demoPrize')?.remove();}
+function arrive(){arrivalComplete=true;mode='arrival';show(null);arrivalTimeout=setTimeout(end,1200);}
+function end(){collisionTimer=arrivalComplete?0:.45;mode='over';const s=Math.floor(score);if(s>best){best=s;try{localStorage.setItem(recordKey,String(best))}catch(e){}}$('finalScore').textContent=s.toLocaleString('fr-CA');$('finalRank').textContent=rank(s);$('finalBest').textContent=best.toLocaleString('fr-CA');$('feedback').textContent=s>=4000?'La forêt connaît maintenant ton nom.':s>=1000?'Une belle récolte ! Encore une expédition ?':'Jacques n’a pas dit son dernier mot !';
+if(arrivalComplete){$('over').querySelector('.brand').textContent='EXPÉDITION RÉUSSIE';$('feedback').textContent='Tu as atteint le refuge. Une belle aventure boréale !';}
+const prize=window.BorealExpeditions.result(s);
+if(prize>0){const panel=document.createElement('p');panel.id='demoPrize';panel.style.cssText='color:#f1b1ad;border:1px solid #b97a8880;padding:14px;border-radius:12px';panel.textContent='Récompense de démonstration : '+prize+' $. Aucun prix réel ni carte-cadeau n’est émis dans cette version d’essai.';$('feedback').after(panel);}
+show('over')}
+function jump(){if(mode==='playing'&&player.jumps<CONFIG.maxJumps)queuedJump=true;}
 function addObstacle(){const next=window.BorealMechanics.nextObstacle({width:W,ground,score,speed,rng:random});obstacles.push(next.obstacle);if(next.obstacle.type==='branch'||next.obstacle.variant==='high')items=items.filter(it=>it.x+it.w<next.obstacle.x-100||it.x>next.obstacle.x+next.obstacle.w+100);spawn=next.nextSpawn}
 
 function addItem(){const berry=random()<.4,type=berry?'berry':'board',x=W+25,y=window.BorealMechanics.recommendCollectibleY({x,ground,type,obstacles,rng:random});collectSpawn=1.4+random()*1.7;if(y===null)return;items.push({x,y,w:berry?18:29,h:berry?18:16,type,taken:false})}
 
 function collision(a,b){const m=5;return a.x+m<b.x+b.w-m&&a.x+a.w-m>b.x+m&&a.y+m<b.y+b.h-m&&a.y+a.h-m>b.y+m}
-function update(dt){if(mode!=='playing')return;elapsed+=dt;speed=Math.min(CONFIG.maxSpeed,CONFIG.initialSpeed+Math.sqrt(score)*CONFIG.acceleration);world+=speed*dt;score+=dt*CONFIG.progressPointsPerSecond;spawn-=dt;collectSpawn-=dt;comboTimer-=dt;if(comboTimer<=0)combo=0;
-if(spawn<=0)addObstacle();if(collectSpawn<=0)addItem();
-landingTimer=Math.max(0,landingTimer-dt);player.run+=dt*12;player.vy+=CONFIG.gravity*dt;player.y+=player.vy*dt;if(player.y>=ground-player.h){if(!player.grounded)landingTimer=.12;player.y=ground-player.h;player.vy=0;player.grounded=true;player.jumps=0}
-for(const o of obstacles)o.x-=speed*dt;for(const it of items)it.x-=speed*dt;
-obstacles=obstacles.filter(o=>o.x+o.w>-30);items=items.filter(it=>it.x+it.w>-30&&!it.taken);
-for(const o of obstacles){if(collision(player,o)){end();return}}
-for(const it of items){if(collision(player,it)){it.taken=true;combo=comboTimer>0?combo+1:1;comboTimer=CONFIG.comboSeconds;score+=(it.type==='berry'?50:125)+Math.min(combo,CONFIG.comboCap)*CONFIG.comboBonus;flash=.18;for(let i=0;i<9;i++)dust.push({x:it.x+it.w/2,y:it.y+it.h/2,vx:(Math.random()-.5)*120,vy:(Math.random()-.5)*130,t:.55})}}
-for(const d of dust){d.x+=d.vx*dt;d.y+=d.vy*dt;d.t-=dt}dust=dust.filter(d=>d.t>0);flash=Math.max(0,flash-dt);
-$('score').textContent=Math.floor(score).toLocaleString('fr-CA');$('hudrank').textContent=rank(score)}
+function update(dt){if(mode!=='playing')return;window.BorealExpeditions.step(expedition,queuedJump);queuedJump=false;syncExpedition();
+$('score').textContent=Math.floor(score).toLocaleString('fr-CA');$('hudrank').textContent=rank(score);
+if(expedition.finished)arrive();else if(expedition.ended)end();}
 // Dessins pixel art : sprites dessinés dans une grille logique et agrandis sans lissage.
 function rect(x,y,w,h,c){ctx.fillStyle=c;ctx.fillRect(Math.round(x),Math.round(y),Math.ceil(w),Math.ceil(h))}
-function heroState(){if(mode==='over')return 'collision';if(mode!=='playing'&&mode!=='paused')return 'idle';if(player.grounded)return landingTimer>0?'land':'run';if(player.vy>80)return 'fall';return player.jumps===2?'doubleJump':'jump'}
+function heroState(){if(mode==='arrival')return player.grounded?'idle':player.vy>80?'fall':'jump';if(mode==='over')return arrivalComplete?'idle':'collision';if(mode!=='playing'&&mode!=='paused')return 'idle';if(player.grounded)return landingTimer>0?'land':'run';if(player.vy>80)return 'fall';return player.jumps===2?'doubleJump':'jump'}
 function drawHero(){if(!assetsReady)return;const state=heroState();const t=state==='run'?player.run/12:state==='collision'?.45-collisionTimer:animationTime;if(mode==='home'&&H>650){const x=W*.76,y=H*.34;ctx.save();ctx.translate(Math.round(x),Math.round(y));ctx.scale(1.45,1.45);window.JacquesSprites.draw(ctx,{x:-player.w/2,y:-player.h,w:player.w,h:player.h},state,t);ctx.restore();return}window.JacquesSprites.draw(ctx,player,state,t)}
 
 function scene(){window.BorealScenery.draw(ctx,{width:W,height:H,ground,world,time:animationTime})}
 
 function obstacleDraw(o){if(o.type==='branch'){rect(o.x,o.y,o.w,o.h,'#5c3e35');rect(o.x,o.y+o.h-5,o.w,5,'#8a6148');for(let i=0;i<o.w;i+=15){rect(o.x+i,o.y-8,12,9,'#42634a');rect(o.x+i+3,o.y-12,6,5,'#5e855b')}}else if(o.type==='rock'){rect(o.x+5,o.y,26,8,'#a6aaa1');rect(o.x,o.y+8,o.w-3,o.h-8,'#69796f');rect(o.x+6,o.y+10,8,5,'#c3c6ad')}else if(o.type==='stump'){rect(o.x+3,o.y,o.w-6,o.h,'#6e4939');rect(o.x,o.y+4,o.w,8,'#a47a55');rect(o.x+9,o.y+17,5,Math.max(1,o.h-21),'#95654a');rect(o.x+o.w-12,o.y+15,4,Math.max(1,o.h-18),'#463d35');if(o.variant==='high'){rect(o.x+o.w-4,o.y+33,10,8,'#614633');rect(o.x+o.w+2,o.y+24,4,12,'#6d583f');rect(o.x+5,o.y+o.h-16,o.w-10,12,'#53724a')}}else{rect(o.x,o.y+8,o.w,o.h-8,'#694535');rect(o.x+2,o.y+1,o.w-4,12,'#a27b5b');rect(o.x+9,o.y+5,8,5,'#d0aa7c');rect(o.x+o.w-11,o.y+7,6,6,'#e2c09a')}}
 function itemDraw(it){const x=it.x,y=it.y;if(it.type==='berry'){rect(x+5,y,8,5,'#648a55');rect(x,y+5,18,12,'#8e4e7d');rect(x+4,y+8,4,4,'#dfb3cd');rect(x+11,y+7,3,3,'#d8a4c6')}else{rect(x,y+5,29,12,'#c38b57');rect(x+2,y+7,25,8,'#e2b77d');rect(x+4,y+2,9,9,'#e9d39d');rect(x+15,y+1,10,9,'#a44f55');rect(x+19,y+4,3,3,'#e1b0aa');rect(x+10,y+9,5,5,'#557e4d')}}
-function draw(){ctx.imageSmoothingEnabled=false;scene();for(const it of items)itemDraw(it);for(const o of obstacles)obstacleDraw(o);drawHero();for(const d of dust)rect(d.x,d.y,4,4,d.t>.25?'#e9a15f':'#b97a88');
+function drawRefuge(){
+if(!expedition)return;
+const remaining=Math.max(0,window.BorealExpeditions.configs[selectedRoute].seconds-expedition.elapsed);
+if(remaining>5&&!arrivalComplete)return;
+const x=Math.round(player.x+18+remaining*Math.max(120,speed*.65)),y=ground-100;
+ctx.save();ctx.imageSmoothingEnabled=false;
+rect(x,y+20,94,80,'#4b3028');rect(x+5,y+24,84,70,'#79513b');
+for(let j=0;j<6;j++)rect(x+5,y+28+j*11,84,3,'#4f392d');
+for(let j=0;j<8;j++)rect(x-10+j*6,y+18-j*4,114-j*12,5,'#314d40');
+rect(x+38,y+55,23,45,'#d9aa63');rect(x+42,y+59,15,37,'#b97a48');rect(x+55,y+78,2,3,'#f4eee5');
+rect(x+12,y+48,17,20,'#1a302c');rect(x+14,y+50,13,16,'#e8b665');rect(x+20,y+50,2,16,'#5d4935');rect(x+14,y+57,13,2,'#5d4935');
+rect(x+70,y+48,17,20,'#1a302c');rect(x+72,y+50,13,16,'#e8b665');rect(x+78,y+50,2,16,'#5d4935');
+rect(x+88,y-25,10,35,'#66554a');
+ctx.fillStyle='#f4eee5';ctx.font='bold 9px system-ui';ctx.fillText('LE REFUGE',x+19,y+40);
+ctx.restore();}
+function draw(){ctx.imageSmoothingEnabled=false;scene();drawRefuge();for(const it of items)itemDraw(it);for(const o of obstacles)obstacleDraw(o);drawHero();for(const d of dust)rect(d.x,d.y,4,4,d.t>.25?'#e9a15f':'#b97a88');
 if(mode==='playing'&&player.jumps===1){ctx.fillStyle='#f2d2a0';ctx.font='bold 12px system-ui';ctx.fillText('DOUBLE SAUT PRÊT',15,H-29)}
 if(mode==='playing'&&combo>=2){ctx.fillStyle='#ffe0a8';ctx.font='bold 18px system-ui';ctx.textAlign='center';ctx.fillText('RÉCOLTE ×'+combo,W/2,Math.max(135,ground*.23));ctx.textAlign='left'}
 if(flash>0){ctx.fillStyle='rgba(245,218,162,'+(flash*.32)+')';ctx.fillRect(0,0,W,H)}}
-function advanceFrame(dt){if(mode!=='playing'){accumulator=0;return}accumulator+=Math.min(CONFIG.maxFrameSeconds,Math.max(0,dt));while(accumulator+1e-10>=CONFIG.fixedStep&&mode==='playing'){update(CONFIG.fixedStep);accumulator-=CONFIG.fixedStep}}
-function loop(t){const dt=last?Math.max(0,(t-last)/1000):0;last=t;if(mode!=='paused'){animationTime+=Math.min(dt,.05);collisionTimer=Math.max(0,collisionTimer-Math.min(dt,.05))}advanceFrame(dt);draw();requestAnimationFrame(loop)}
+function advanceFrame(dt){if(mode!=='playing'){accumulator=0;return}accumulator+=Math.min(CONFIG.maxFrameSeconds,Math.max(0,dt))*(quickTest?4:1);while(accumulator+1e-10>=CONFIG.fixedStep&&mode==='playing'){update(CONFIG.fixedStep);accumulator-=CONFIG.fixedStep}}
+function loop(t){const dt=last?Math.max(0,(t-last)/1000):0;last=t;if(mode!=='paused'){animationTime+=Math.min(dt,.05);collisionTimer=Math.max(0,collisionTimer-Math.min(dt,.05))}advanceFrame(dt);if(mode==='arrival'&&!player.grounded){const landingDt=Math.min(.05,dt);player.vy+=CONFIG.gravity*landingDt;player.y+=player.vy*landingDt;if(player.y>=ground-player.h){player.y=ground-player.h;player.vy=0;player.grounded=true;player.jumps=0;}}draw();requestAnimationFrame(loop)}
 function pause(){if(mode==='playing'){mode='paused';accumulator=0;show('paused')}}
 
 $('start').onclick=reset;$('fromHow').onclick=reset;$('retry').onclick=reset;
 $('how').onclick=()=>{mode='instructions';show('instructions')};$('back').onclick=()=>{mode='home';show('home')};
 $('pauseBtn').onclick=pause;
 $('resume').onclick=()=>{mode='playing';last=0;accumulator=0;show(null)};
-$('exit').onclick=$('menu').onclick=()=>{mode='home';show('home')};
+$('exit').onclick=$('menu').onclick=()=>{clearTimeout(arrivalTimeout);mode='home';show('home')};
 canvas.addEventListener('pointerdown',e=>{e.preventDefault();jump()});
 document.addEventListener('keydown',e=>{if((e.code==='Space'||e.code==='ArrowUp')&&mode==='playing'){e.preventDefault();if(!e.repeat)jump()}});
 window.addEventListener('resize',resize);
