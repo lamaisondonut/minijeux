@@ -16,8 +16,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: node tests/expeditions.test.cjs
+      - run: npm ci --ignore-scripts
+      - run: node --test tests/expeditions.test.cjs tests/obstacles-regression.test.cjs
       - run: python3 scripts/build-expedition-demo.py
+      - run: npx playwright install --with-deps chromium
+      - name: Browser obstacle and expedition checks
+        run: |
+          export CHROMIUM_PATH="$(node -p "require('playwright').chromium.executablePath()")"
+          node tests/expeditions-browser.cjs
       - uses: actions/upload-artifact@v4
         with:
           name: defi-boreal-expeditions-essai

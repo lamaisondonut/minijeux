@@ -24,6 +24,14 @@ Le temps rapporte22points/s ; chaque planche rapporte125points plus un bonus de
 combo de25à125points. Le nombre fini de planches et le temps bornent le score :
 il n'est jamais écrêté. Les parcours permettent effectivement les paliers visés.
 
+Le générateur original de la V3 est réutilisé : rochers, bûches, souches,
+souches hautes à double saut et branches sous lesquelles passer au sol.
+Le premier obstacle apparaît après environ1,9s ; les suivants suivent le calcul
+d'espacement de la V3 (environ1,6à2,9s selon la vitesse). Les séries de récoltes
+ne suppriment plus les obstacles. Seules les4dernières secondes n'en ajoutent
+plus, pour l'approche du refuge ; les obstacles déjà présents restent actifs.
+Les objets dangereux à proximité d'une souche haute ou d'une branche sont
+écartés selon les règles de placement originales, sans supprimer le danger.
 Les obstacles restent franchissables. L'arrivée est un refuge dessiné dans la
 forêt originale. Un saut en cours se termine pendant l'animation d'arrivée.
 Pause, reprise, commandes tactiles/clavier et records séparés par parcours.
@@ -32,7 +40,7 @@ cet essai utilisent des planches pour démontrer la borne de score précisément
 Les animaux, panoramas et toutes les cellules de Jacques restent d'origine.
 
 ## Vérification et livraison
-    node tests/expeditions.test.cjs
+    node --test tests/expeditions.test.cjs tests/obstacles-regression.test.cjs
     node tests/expeditions-browser.cjs
     python3 scripts/build-expedition-demo.py
 Le test navigateur nécessite Python3, Playwright et Chromium (CHROMIUM_PATH).
@@ -40,9 +48,16 @@ Le script génère work/expedition-demo/index.html, autonome et jouable hors lig
 essais.html et LISEZ-MOI.txt. Extraire entièrement le ZIP avant ouverture.
 Le workflow GitHub Expedition demo crée une archive téléchargeable de ce dossier.
 
-7tests moteur, dont100simulations sur5formats d'écran et4parcours ;32contrôles
-Chromium couvrant les arrivées, résultats fictifs, pause/reprise, rejouer,
-ordinateur, rotation et lancement hors ligne. Aucun téléphone physique testé.
+9tests moteur et3tests de non-régression des obstacles : rythme original,
+présence des5variantes, collisions réelles, relecture de4parties complètes,
+limites du score, double saut et formats d'écran. Les entrées gagnantes sont
+conservées dans tests/fixtures/expeditions-inputs.json et rejouées sans modifier
+le joueur, les obstacles ni le score.37contrôles Chromium vérifient les arrivées,
+les5variantes réellement dessinées pendant les parties, les résultats fictifs,
+la pause/reprise, rejouer, ordinateur, rotation et lancement hors ligne.
+Les diagnostics de densité déplacent le joueur hors écran uniquement dans le
+test concerné ; ils ne prétendent pas démontrer la franchissabilité.
+Aucun téléphone physique testé.
 
 ## Pour la future version avec argent réel
 Le choix du parcours sera fait par le serveur après une réservation atomique,
