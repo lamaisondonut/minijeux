@@ -26,5 +26,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: defi-boreal-noel-tests
-          path: artifacts/noel/
+          path: |
+            artifacts/noel/
+            artifacts/noel-home/
           retention-days: 30

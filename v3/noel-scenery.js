@@ -5,9 +5,14 @@
 (() => {
   'use strict';
   const base = window.BorealScenery;
+  const sleigh = window.BorealNoelSleigh;
   if (!base) throw new Error('Le décor V3 doit être chargé avant son édition de Noël.');
   const mod = (n, d) => ((n % d) + d) % d;
   const surface = (w, h) => { const s = document.createElement('canvas'); s.width = w; s.height = h; return s; };
+  // Replace only the two decorative flying-bird frames in this seasonal runtime.
+  // Original V3 artwork and its renderer on disk remain unchanged.
+  const emptyBird = surface(1, 1);
+  base.sprites.birds.splice(0, base.sprites.birds.length, emptyBird, emptyBird);
   const pixel = (c, x, y, w, h, color) => {
     c.fillStyle = color;
     c.fillRect(Math.round(x), Math.round(y), Math.max(1, Math.round(w)), Math.max(1, Math.round(h)));
@@ -226,6 +231,7 @@
     const festoonY = Math.max(8, Math.round(g * .035));
     const festoonOffset = mod(world * .018, sprites.festoon.width);
     for (let x = -festoonOffset; x < W; x += sprites.festoon.width) sprite(c, sprites.festoon, x, festoonY, 1, .91);
+    sleigh?.draw(c, options);
     snow(c, 1, W, H, world, time, reduced);
     // Fresh powder follows the exact logical ground; hazards are drawn later.
     c.fillStyle = 'rgba(125,166,193,.35)'; c.fillRect(0, g, W, H - g);
@@ -244,7 +250,7 @@
     c.restore();
   }
   // Exposed metadata is useful for verifying budgets without touching gameplay.
-  const ready = base.ready.then(() => Object.freeze({ loaded: true, season: 'noel' }));
+  const ready = Promise.all([base.ready, sleigh?.ready]).then(() => Object.freeze({ loaded: true, season: 'noel' }));
   window.BorealNoelScenery = Object.freeze({
     draw, ready, base, sprites, snowPlanes,
     layers: Object.freeze([...base.layers, ...snowPlanes]),

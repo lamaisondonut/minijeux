@@ -83,3 +83,20 @@ ou activée. Les points affichés restent locaux et ne constituent pas une preuv
 de gain. L’intégration serveur future devra vérifier les parties et les budgets.
 Les personnages Zoltan, Tristan, Vanessa et Manon et un menu de sélection sont
 notés dans `EVOLUTIONS-PERSONNAGES.md`, hors de cette livraison.
+
+## Menu d’accueil et traîneau
+
+Jacques est affiché à 1,9× dans le menu (au lieu de 1,45×), avec une position
+abaissée et adaptée à la place disponible à droite du titre. Sa taille pendant
+la partie reste inchangée. Le calcul de composition est mis en cache par taille
+de vue ; il n’ajoute pas de mesure DOM à chaque image.
+
+`noel-sleigh.js` charge une nouvelle illustration transparente représentant le
+père Noël et exactement six rennes. Elle remplace le petit oiseau volant dans le
+décor de Noël ; les deux anciennes frames sont rendues transparentes uniquement
+dans le cache saisonnier, sans modifier `scenery.js` ni les fichiers originaux.
+Le renne de tête est celui situé tout à droite, dans le sens du vol. Son nez
+reste rouge et sa luminosité pulse doucement à 1 Hz avec le temps de l’animation.
+Le mouvement et la pulsation se figent en pause ; le mode de réduction des
+animations affiche un éclairage et une position stables. Le cache est créé au
+chargement et aucune image ni Canvas n’est alloué à chaque frame.

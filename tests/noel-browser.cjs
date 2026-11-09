@@ -405,8 +405,8 @@ const imageTracker=()=>{
   await deterministic.close();
 
   const noelScripts=Array.from(sourceHTML.matchAll(/<script[^>]+src=["']([^"']*noel[^"']*)["']/gi),match=>match[1]);
-  check(noelScripts.length===4,'quatre modules visuels Noël chargés par le HTML livré');
-  const missingResources=[...noelScripts,'assets/noel/jacques-noel-atlas.png','assets/noel/jacques-noel-atlas.json','assets/noel/forest-panorama-noel.png','assets/noel/forest-landscape-noel.png'];
+  check(noelScripts.length===5,'cinq modules visuels Noël chargés par le HTML livré');
+  const missingResources=[...noelScripts,'assets/noel/jacques-noel-atlas.png','assets/noel/jacques-noel-atlas.json','assets/noel/forest-panorama-noel.png','assets/noel/forest-landscape-noel.png','assets/noel/santa-sleigh-six-reindeer.png'];
   for(const [index,resource] of missingResources.entries()){
    const unavailable=await browser.newContext({viewport,isMobile:true,hasTouch:true});
    const resourceURL=new URL(resource,origin+'/v3/index.html').href;
