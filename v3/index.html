@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#284a3d"><title>Le Défi Boréal | Les Boréalistes</title>
+<meta name="theme-color" content="#284a3d"><title>Le Défi Boréal — Noël | Les Boréalistes</title>
 <style>
 :root{--forest:#284a3d;--deep:#172b27;--cream:#f4eee5;--rose:#b97a88;--mauve:#72556f;--gold:#e9a15f}
 *{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#101e1b;color:var(--cream);font-family:"Cocogoose","Avenir Next",system-ui,sans-serif;-webkit-tap-highlight-color:transparent;user-select:none}
@@ -39,23 +39,28 @@ button:focus-visible{outline:3px solid #e9a15f;outline-offset:3px}button:disable
 #assetError{z-index:10}#assetError p{color:#f4eee5}
 @media(max-height:650px){#home .brand{top:15px;font-size:13px}#home h1{font-size:43px;margin:8px 0}#home .panel{padding-bottom:8px}#home .tips{display:none}#home p{font-size:12px;margin:5px 0}#home button{min-height:42px;margin-top:7px;padding:10px}#home .panel>p:last-child{font-size:10px}}
 @media(prefers-reduced-motion:reduce){button:active{transform:none}}
+.noelEdition{align-self:flex-start;margin:-5px 0 10px;padding:6px 12px;border:1px solid #ecc77b80;border-radius:30px;font-size:10px;letter-spacing:.22em;color:#f8dfaa;background:#142e32a8}#home h1 em{color:#eaa6a2}.foot{font-size:8px}@media(max-height:650px){.noelEdition{margin:0;padding:4px 9px;font-size:9px}}
 </style></head><body><main id="app"><canvas id="game" aria-label="Jeu Le Défi Boréal"></canvas>
 <div class="hud off" id="hud"><div class="stat"><small>POINTS</small><strong id="score">0</strong><div class="rank" id="hudrank">Promeneur</div></div><button class="pause" id="pauseBtn" aria-label="Pause"><span class="pause-icon" aria-hidden="true"></span></button><div class="stat right"><small>RECORD</small><strong id="best">0</strong></div></div>
-<section class="overlay" id="home"><div class="panel"><div class="brand">LES BORÉALISTES</div><div class="orn">✦ ✦ ✦</div><h1>LE DÉFI <em>BORÉAL</em></h1><p>Collecte les plats. Évite les obstacles. Dépasse ton record.</p><div class="tips"><div class="tip"><b>☝️</b>Deux sauts<br>maximum</div><div class="tip"><b>🧀</b>Récolte<br>les planches</div><div class="tip"><b>🌲</b>Évite<br>les obstacles</div></div><button class="primary" id="start" disabled>PRÉPARATION…</button><button class="alt" id="how">COMMENT JOUER</button><p style="margin-bottom:0;font-size:11px">Record personnel : <strong id="homebest">0</strong> points</p></div></section>
-<section class="overlay off" id="instructions"><div class="panel"><div class="brand">GUIDE DU GRAND NORD</div><h2>Chaque saut compte.</h2><p>Jacques court automatiquement. Touche pour sauter. <strong>Deux sauts par atterrissage</strong> : le second saut permet d’atteindre les plats en hauteur.</p><p>Évite les bûches, les rochers et les branches. Récupère les planches et les petits fruits pour gagner des points. Enchaîne les récoltes pour obtenir un bonus.</p><p>Les grandes souches demandent deux sauts. Passe sous les branches sans sauter. Plus tu avances, plus les obstacles sont variés. Ton titre boréal évolue avec ton score.</p><button class="primary" id="fromHow">C'EST PARTI !</button><button class="alt" id="back">RETOUR</button></div></section>
+<section class="overlay" id="home"><div class="panel"><div class="brand">LES BORÉALISTES</div><div class="orn">✦ ✦ ✦</div><h1>LE DÉFI <em>BORÉAL</em></h1><span class="noelEdition">NOËL BORÉAL</span><p>Une forêt enneigée. Des trésors des Fêtes. Une nouvelle expédition pour Jacques.</p><div class="tips"><div class="tip"><b>☝️</b>Deux sauts<br>maximum</div><div class="tip"><b>🎁</b>Récolte<br>les cadeaux</div><div class="tip"><b>🌲</b>Évite<br>les obstacles</div></div><button class="primary" id="start" disabled>PRÉPARATION…</button><button class="alt" id="how">COMMENT JOUER</button><p style="margin-bottom:0;font-size:11px">Record personnel : <strong id="homebest">0</strong> points</p></div></section>
+<section class="overlay off" id="instructions"><div class="panel"><div class="brand">GUIDE DU GRAND NORD</div><h2>Chaque saut compte.</h2><p>Jacques court automatiquement. Touche pour sauter. <strong>Deux sauts par atterrissage</strong> : le second saut permet d’atteindre les plats en hauteur.</p><p>Évite les bûches, les rochers et les branches. Récupère les cadeaux, les étoiles, les clochettes et les sucres d’orge pour gagner des points. Enchaîne les récoltes pour obtenir un bonus.</p><p>Les grandes souches demandent deux sauts. Passe sous les branches sans sauter. Plus tu avances, plus les obstacles sont variés. Ton titre boréal évolue avec ton score.</p><button class="primary" id="fromHow">C'EST PARTI !</button><button class="alt" id="back">RETOUR</button></div></section>
 <section class="overlay off" id="paused"><div class="panel"><div class="brand">PETITE PAUSE</div><h2>La forêt t'attend.</h2><button class="primary" id="resume">CONTINUER</button><button class="alt" id="exit">QUITTER LA PARTIE</button></div></section>
 <section class="overlay off" id="over"><div class="panel"><div class="brand">FIN DE L'EXPÉDITION</div><div class="orn">✦ ✦ ✦</div><div class="scoreBig" id="finalScore">0</div><div class="pill" id="finalRank">Promeneur boréal</div><p id="feedback">Belle randonnée !</p><p style="font-size:11px">Meilleur score : <strong id="finalBest">0</strong></p><button class="primary" id="retry">REJOUER</button><button class="alt" id="menu">MENU PRINCIPAL</button></div></section>
 <section class="overlay off" id="assetError" role="alert"><div class="panel"><div class="brand">LE DÉFI BORÉAL</div><h2>La forêt se prépare.</h2><p id="assetErrorMessage">Les images du jeu n’ont pas pu être chargées. Vérifie ta connexion, puis réessaie.</p><button class="primary" id="reloadAssets">RÉESSAYER</button></div></section>
-<div class="foot">UNE AVENTURE SIGNÉE LES BORÉALISTES</div></main>
+<div class="foot">ÉDITION DE NOËL · PRÉVISUALISATION · LES BORÉALISTES</div></main>
+<script src="noel-assets.js"></script>
 <script src="mechanics.js"></script>
 <script src="scenery.js"></script>
 <script src="jacques.js"></script>
+<script src="jacques-noel.js"></script>
+<script src="noel-scenery.js"></script>
+<script src="noel-collectibles.js"></script>
 <script>
 (()=>{
 'use strict';
 const $=id=>document.getElementById(id),canvas=$('game'),ctx=canvas.getContext('2d',{alpha:false});
 $('reloadAssets').onclick=()=>location.reload();
-if(!window.BorealMechanics||!window.BorealScenery||!window.JacquesSprites){$('assetError').classList.remove('off');return}
+if(!window.BorealNoelAssets||!window.BorealMechanics||!window.BorealScenery||!window.JacquesNoelSprites||!window.BorealNoelScenery||!window.BorealNoelCollectibles){$('assetError').classList.remove('off');return}
 const screens=['home','instructions','paused','over'];
 // Paramètres du moteur existant ; les récompenses ne doivent jamais dépendre de ce score local.
 const CONFIG=Object.freeze({initialSpeed:315,maxSpeed:530,acceleration:2.8,gravity:1520,firstJump:-565,secondJump:-510,maxJumps:2,progressPointsPerSecond:22,comboSeconds:2.7,comboCap:5,comboBonus:25,fixedStep:1/120,maxFrameSeconds:.1,...window.BorealMechanics.config});
@@ -86,12 +91,12 @@ $('score').textContent=Math.floor(score).toLocaleString('fr-CA');$('hudrank').te
 // Dessins pixel art : sprites dessinés dans une grille logique et agrandis sans lissage.
 function rect(x,y,w,h,c){ctx.fillStyle=c;ctx.fillRect(Math.round(x),Math.round(y),Math.ceil(w),Math.ceil(h))}
 function heroState(){if(mode==='over')return 'collision';if(mode!=='playing'&&mode!=='paused')return 'idle';if(player.grounded)return landingTimer>0?'land':'run';if(player.vy>80)return 'fall';return player.jumps===2?'doubleJump':'jump'}
-function drawHero(){if(!assetsReady)return;const state=heroState();const t=state==='run'?player.run/12:state==='collision'?.45-collisionTimer:animationTime;if(mode==='home'&&H>650){const x=W*.76,y=H*.34;ctx.save();ctx.translate(Math.round(x),Math.round(y));ctx.scale(1.45,1.45);window.JacquesSprites.draw(ctx,{x:-player.w/2,y:-player.h,w:player.w,h:player.h},state,t);ctx.restore();return}window.JacquesSprites.draw(ctx,player,state,t)}
+function drawHero(){if(!assetsReady)return;const state=heroState();const t=state==='run'?player.run/12:state==='collision'?.45-collisionTimer:animationTime;if(mode==='home'&&H>650){const x=W*.76,y=H*.34;ctx.save();ctx.translate(Math.round(x),Math.round(y));ctx.scale(1.45,1.45);window.JacquesNoelSprites.draw(ctx,{x:-player.w/2,y:-player.h,w:player.w,h:player.h},state,t);ctx.restore();return}window.JacquesNoelSprites.draw(ctx,player,state,t)}
 
-function scene(){window.BorealScenery.draw(ctx,{width:W,height:H,ground,world,time:animationTime})}
+function scene(){window.BorealNoelScenery.draw(ctx,{width:W,height:H,ground,world,time:animationTime})}
 
 function obstacleDraw(o){if(o.type==='branch'){rect(o.x,o.y,o.w,o.h,'#5c3e35');rect(o.x,o.y+o.h-5,o.w,5,'#8a6148');for(let i=0;i<o.w;i+=15){rect(o.x+i,o.y-8,12,9,'#42634a');rect(o.x+i+3,o.y-12,6,5,'#5e855b')}}else if(o.type==='rock'){rect(o.x+5,o.y,26,8,'#a6aaa1');rect(o.x,o.y+8,o.w-3,o.h-8,'#69796f');rect(o.x+6,o.y+10,8,5,'#c3c6ad')}else if(o.type==='stump'){rect(o.x+3,o.y,o.w-6,o.h,'#6e4939');rect(o.x,o.y+4,o.w,8,'#a47a55');rect(o.x+9,o.y+17,5,Math.max(1,o.h-21),'#95654a');rect(o.x+o.w-12,o.y+15,4,Math.max(1,o.h-18),'#463d35');if(o.variant==='high'){rect(o.x+o.w-4,o.y+33,10,8,'#614633');rect(o.x+o.w+2,o.y+24,4,12,'#6d583f');rect(o.x+5,o.y+o.h-16,o.w-10,12,'#53724a')}}else{rect(o.x,o.y+8,o.w,o.h-8,'#694535');rect(o.x+2,o.y+1,o.w-4,12,'#a27b5b');rect(o.x+9,o.y+5,8,5,'#d0aa7c');rect(o.x+o.w-11,o.y+7,6,6,'#e2c09a')}}
-function itemDraw(it){const x=it.x,y=it.y;if(it.type==='berry'){rect(x+5,y,8,5,'#648a55');rect(x,y+5,18,12,'#8e4e7d');rect(x+4,y+8,4,4,'#dfb3cd');rect(x+11,y+7,3,3,'#d8a4c6')}else{rect(x,y+5,29,12,'#c38b57');rect(x+2,y+7,25,8,'#e2b77d');rect(x+4,y+2,9,9,'#e9d39d');rect(x+15,y+1,10,9,'#a44f55');rect(x+19,y+4,3,3,'#e1b0aa');rect(x+10,y+9,5,5,'#557e4d')}}
+function itemDraw(it){window.BorealNoelCollectibles.draw(ctx,it)}
 function draw(){ctx.imageSmoothingEnabled=false;scene();for(const it of items)itemDraw(it);for(const o of obstacles)obstacleDraw(o);drawHero();for(const d of dust)rect(d.x,d.y,4,4,d.t>.25?'#e9a15f':'#b97a88');
 if(mode==='playing'&&player.jumps===1){ctx.fillStyle='#f2d2a0';ctx.font='bold 12px system-ui';ctx.fillText('DOUBLE SAUT PRÊT',15,H-29)}
 if(mode==='playing'&&combo>=2){ctx.fillStyle='#ffe0a8';ctx.font='bold 18px system-ui';ctx.textAlign='center';ctx.fillText('RÉCOLTE ×'+combo,W/2,Math.max(135,ground*.23));ctx.textAlign='left'}
@@ -112,7 +117,7 @@ document.addEventListener('visibilitychange',()=>{if(document.hidden)pause()});
 window.addEventListener('blur',pause);
 $('reloadAssets').onclick=()=>location.reload();
 $('fromHow').disabled=true;
-Promise.all([window.JacquesSprites.ready,window.BorealScenery.ready]).then(()=>{assetsReady=true;canvas.dataset.ready='true';$('start').disabled=false;$('fromHow').disabled=false;$('start').textContent='JOUER →'}).catch(error=>{console.error('Chargement des images du jeu impossible',error);if(location.protocol==='file:')$('assetErrorMessage').textContent='Cette version utilise des fichiers séparés. Pour jouer sans installation, ouvre la version autonome du Défi Boréal. Tu peux aussi ouvrir le jeu depuis son site Web.';$('assetError').classList.remove('off')});
+Promise.all([window.JacquesNoelSprites.ready,window.BorealNoelScenery.ready]).then(()=>{assetsReady=true;canvas.dataset.ready='true';$('start').disabled=false;$('fromHow').disabled=false;$('start').textContent='JOUER →'}).catch(error=>{console.error('Chargement des images du jeu impossible',error);if(location.protocol==='file:')$('assetErrorMessage').textContent='Cette version utilise des fichiers séparés. Pour jouer sans installation, ouvre la version autonome du Défi Boréal. Tu peux aussi ouvrir le jeu depuis son site Web.';$('assetError').classList.remove('off')});
 resize();show('home');requestAnimationFrame(loop);
 })();
 </script></body></html>
