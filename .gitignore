@@ -1,3 +1,12 @@
 node_modules/
 artifacts/*.log
 dist/
+.wrangler/
+.dev.vars*
+.env*
+!.env.example
+work/
+wrangler.preview.local.jsonc
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal

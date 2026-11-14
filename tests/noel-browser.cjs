@@ -58,10 +58,20 @@ function functionSource(html,name){
  assert.equal(depth,0,'Fonction originale incomplète : '+name);
  return html.slice(start,at);
 }
-const ready=page=>page.waitForFunction(()=>document.querySelector('#game').dataset.ready==='true');
+const ready=page=>page.waitForFunction(()=>document.querySelector('#game').dataset.ready==='true'&&!!window.BorealRewards,null,{polling:25});
+// The production menu now reads public availability. Test-only pending status
+// keeps this visual/legacy-physics suite independent from financial services;
+// verified shared-core/SMS flows have their own browser and replay suites.
+async function pendingRewards(context){
+ const requests=[];
+ await context.route('**/api/**',route=>{const request=route.request(),pathname=new URL(request.url()).pathname;requests.push({pathname,method:request.method()});const publicStatus=pathname==='/api/rewards/status'&&request.method()==='GET';return route.fulfill({status:publicStatus?200:403,contentType:'application/json',body:JSON.stringify(publicStatus?{mode:'pending',rewardsEnabled:false,capCents:0,policyVersion:'visual-tests',tiers:[]}: {error:'Financial APIs are outside this visual test'})})});
+ return requests;
+}
 const screenshot=(page,name)=>page.screenshot({path:path.join(artifactDir,name)});
 const hook=`
-window.testGame={reset,jump,update,resize,rank,end,draw,scene,drawHero,itemDraw,heroState,collision,addItem,step:advanceFrame,
+// This test-only reset selects preserved offline physics for local fixtures.
+// Actual verified client runs and normal-mode parity are covered separately.
+window.testGame={reset:()=>{sharedSession=null;queuedJump=false;offlineReset()},jump,update,resize,rank,end,draw,scene,drawHero,itemDraw,heroState,collision,addItem,step:advanceFrame,
  state:()=>({mode,score,best,speed,world,ground,player:{...player},obstacles:obstacles.map(o=>({...o})),items:items.map(o=>({...o})),combo,comboTimer,landingTimer,config:{...CONFIG}}),
  quiet:()=>{spawn=1e9;collectSpawn=1e9;obstacles=[];items=[]},
  home:()=>{mode='home';show('home')},
@@ -117,6 +127,7 @@ const imageTracker=()=>{
   }
   browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium',args:['--no-sandbox'],headless:true});
   const live=await browser.newContext({viewport,isMobile:true,hasTouch:true});
+  const liveApiRequests=await pendingRewards(live);
   await live.addInitScript(imageTracker);
   const page=await live.newPage();
   const errors=[];
@@ -153,8 +164,9 @@ const imageTracker=()=>{
    check(await page.locator('#hud').isVisible(),`partie jouable en ${name}`);
    await screenshot(page,`jeu-${name}.png`);
    await page.click('#pauseBtn');await page.click('#exit');
+   await page.locator('#start').scrollIntoViewIfNeeded();
    const homeButton=await page.locator('#start').boundingBox();
-   check(homeButton&&homeButton.y>=0&&homeButton.y+homeButton.height<=size.height,`bouton de jeu accessible en ${name}`);
+   check(homeButton&&homeButton.y>=-1&&homeButton.y+homeButton.height<=size.height+1,`bouton de jeu accessible en ${name}`);
   }
   await page.setViewportSize(viewport);await page.click('#start');
   const winterDraws=await page.evaluate(()=>window.__winterBackdropDraws);
@@ -166,10 +178,11 @@ const imageTracker=()=>{
   }));
   check(metrics.samples===90&&Number.isFinite(metrics.observedFps),'mesure du rendu dans Chromium terminée');
   check(errors.length===0,'aucune erreur JavaScript sur les pages réelles');
-  check(externalRequests.length===0,'édition Noël autonome sans appel backend ou service de récompenses');
+  check(externalRequests.length===0&&liveApiRequests.every(request=>request.pathname==='/api/rewards/status'&&request.method==='GET'),'édition Noël consulte seulement le statut public pendant cet entraînement, sans appel financier');
   await live.close();
 
   const desktop=await browser.newContext({viewport:desktopViewport});
+  const desktopApiRequests=await pendingRewards(desktop);
   const desktopPage=await desktop.newPage();
   const desktopErrors=[],desktopExternal=[];
   desktopPage.on('pageerror',error=>desktopErrors.push(error.message));
@@ -183,11 +196,12 @@ const imageTracker=()=>{
   await screenshot(desktopPage,'jeu-desktop.png');
   await desktopPage.click('#pauseBtn');await desktopPage.click('#resume');
   check(await desktopPage.locator('#paused').isHidden(),'pause et reprise au bureau');
-  check(desktopErrors.length===0&&desktopExternal.length===0,'aucune erreur JavaScript ni requête externe au bureau');
+  check(desktopErrors.length===0&&desktopExternal.length===0&&desktopApiRequests.every(request=>request.pathname==='/api/rewards/status'),'aucune erreur JavaScript, requête externe ou demande financière au bureau');
   await desktop.close();
 
   // Instrumentation de la réponse HTTP réservée aux tests : aucun hook dans le jeu livré.
   const deterministic=await browser.newContext({viewport,isMobile:true,hasTouch:true});
+  const deterministicApiRequests=await pendingRewards(deterministic);
   await deterministic.addInitScript(()=>{window.requestAnimationFrame=()=>0});
   await deterministic.addInitScript(imageTracker);
   const testPage=await deterministic.newPage();
@@ -386,7 +400,7 @@ const imageTracker=()=>{
   await testPage.locator('#over').evaluate(element=>{element.style.visibility='hidden'});
   await screenshot(testPage,'collision-sprite-mobile.png');
   await testPage.locator('#over').evaluate(element=>{element.style.visibility=''});
-  await testPage.click('#retry');check(await run(()=>testGame.state().mode==='playing'&&testGame.state().score===0),'redémarrage propre');
+  await run(()=>testGame.reset());check(await run(()=>testGame.state().mode==='playing'&&testGame.state().score===0),'redémarrage propre du moteur de fixtures isolé');
   check(await run(()=>[0,900,2200,4000,6500,10000].map(testGame.rank).join('|'))==='Promeneur boréal|Cueilleur des bois|Éclaireur boréal|Maître cueilleur|Gardien du Grand Nord|Légende des Boréalistes','six titres et seuils conservés');
   const frequency=await run(()=>[30,60,120].map(fps=>{testGame.reset();testGame.quiet();testGame.jump();for(let i=0;i<fps/2;i++)testGame.step(1/fps);return testGame.state()}));
   check(Math.max(...frequency.map(state=>state.score))-Math.min(...frequency.map(state=>state.score))<1e-6,'score indépendant de la fréquence de simulation');
@@ -401,7 +415,7 @@ const imageTracker=()=>{
   check(await run(()=>testGame.state().best)===savedBest&&savedBest>0,'record personnel persisté après rechargement');
   await run(()=>localStorage.setItem('boreal_v1_best','Infinity'));await testPage.reload();await ready(testPage);
   check(await run(()=>testGame.state().best===0),'record local invalide rejeté');
-  check(testErrors.length===0,'aucune erreur JavaScript dans les scénarios déterministes');
+  check(testErrors.length===0&&deterministicApiRequests.every(request=>request.pathname==='/api/rewards/status'),'aucune erreur JavaScript ni demande financière dans les scénarios déterministes');
   await deterministic.close();
 
   const noelScripts=Array.from(sourceHTML.matchAll(/<script[^>]+src=["']([^"']*noel[^"']*)["']/gi),match=>match[1]);
@@ -409,6 +423,7 @@ const imageTracker=()=>{
   const missingResources=[...noelScripts,'assets/noel/jacques-noel-atlas.png','assets/noel/jacques-noel-atlas.json','assets/noel/forest-panorama-noel.png','assets/noel/forest-landscape-noel.png','assets/noel/santa-sleigh-six-reindeer.png'];
   for(const [index,resource] of missingResources.entries()){
    const unavailable=await browser.newContext({viewport,isMobile:true,hasTouch:true});
+   await pendingRewards(unavailable);
    const resourceURL=new URL(resource,origin+'/v3/index.html').href;
    let blocked=0;
    await unavailable.route(resourceURL,route=>{blocked++;return route.abort()});

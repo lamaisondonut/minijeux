@@ -1,39 +1,33 @@
-# Le Défi Boréal — V3.0.1
+# Le Défi Boréal — Édition de Noël et récompenses
 
-## Essayer immédiatement
+Développement sur `develop/noel-recompenses-v1`, depuis Noël `080fe40`. La production `livraison-v3` reste séparée.
 
-Télécharger `downloads/defi-boreal-v3-autonome.zip`, extraire tout, puis ouvrir son unique `index.html` dans Chrome, Edge ou Safari sur ordinateur. On peut aussi télécharger `downloads/defi-boreal-v3-autonome.html` et l’ouvrir directement. Le code, les images et les animations sont tous intégrés ; aucun serveur ni téléchargement annexe requis. Les aperçus HTML de certaines applications mobiles n’exécutent pas les jeux ; sur téléphone, utiliser un vrai navigateur et de préférence un hébergement Web. Aucun site public jouable n’est encore déployé.
+Le menu officiel fourni par GOAT est intégré. Le jeu conserve Jacques, ses images et animations de Noël, les obstacles et le double saut. Les récompenses nécessitent une partie rejouée et validée par le serveur, puis une vérification SMS ; aucun compte n’est requis avant de jouer.
 
-Le test `npm run test:standalone` vérifie ce HTML hors ligne, sur origine opaque, et en HTTP. Le navigateur géré de cet environnement bloque file:// ; ce mode précis n’a pas été exécuté ici.
+## Essayer et vérifier
 
-## Projet et sources
+Node.js 24, Python 3 et Chromium sont nécessaires aux tests.
 
-**Nouvelle version jouable : `v3/index.html`.** Voir [changements V3](docs/V3.md), [mécaniques](docs/MECHANICS-V3.md), [décor](docs/SCENERY-V3.md) et [tests](docs/TESTS-V3.md). La V2.1 reste disponible à `current/index.html`, sans modification.
+```sh
+npm ci --ignore-scripts
+npm run build:pages
+npm run test:rewards
+npm run test:noel
+```
 
-`npm run dev` sert le dépôt ; sélectionner `/v3/index.html`. `npm run test:v3` exécute les tests V3. Archive déployable : `dist/defi-boreal-v3-jouable.zip`, désormais avec un seul index autonome. Archive complète : `dist/defi-boreal-v3-projet.zip`. Aucun backend ni récompense actif.
+Définir `CHROMIUM_PATH` si Chromium n’est pas installé dans `/usr/bin/chromium` (par exemple le chemin de `require('playwright').chromium.executablePath()`). `npm run test:pages` applique la migration à un D1 local temporaire et teste le véritable Worker Pages dans le navigateur.
 
-## Documentation de la V2.1 conservée
+Sans D1, secrets et approbations, la prévisualisation propose uniquement l’entraînement, sans gain ; `/admin/` refuse les accès. Les tests des récompenses utilisent de vraies transactions SQLite et des fournisseurs externes simulés dans les tests uniquement. Aucun SMS payant n’est envoyé par les tests.
 
-Jeu HTML5 autonome des Boréalistes, modifié à partir de la V2 fournie. Voir [audit](docs/AUDIT.md), [plan](docs/PLAN.md), [architecture des récompenses](docs/REWARDS_ARCHITECTURE.md), [direction artistique](docs/ART_DIRECTION.md) et [journal](CHANGELOG.md).
+## Configurer
 
-## Lancer
+- [Configuration Cloudflare, comptes employés et décisions avant activation](docs/RECOMPENSES-CLOUDFLARE.md)
+- [API et paramètres](docs/API-RECOMPENSES.md)
+- [Tests et limites](docs/TESTS-RECOMPENSES.md)
+- [Procédure simple pour le personnel](docs/PROCEDURE-EMPLOYES.md)
+- [Projet de règlement et confidentialité](v3/reglement.html)
+- [Provenance exacte des logos fournis](docs/BRANDING-PROVENANCE.json)
 
-Depuis `/workspace/minijeux` : `npm run dev` (Python 3 requis). Entrée du jeu : `/current/index.html`, port 8000. En local, ouvrir cette entrée dans le navigateur. En cloud, les requêtes locales servent à la vérification interne ; aucune prévisualisation publique n'est fournie.
+Publier le **dossier `v3`**, avec son Worker généré, ses modules et ses images. L’ancien HTML autonome V3 reste une archive du jeu antérieur : il ne contient pas ce serveur et ne convient pas aux récompenses sécurisées.
 
-Aucune dépendance réseau ni variable d'environnement n'est nécessaire au jeu. Paramètres actuels centralisés dans CONFIG dans `current/index.html`. Il ne faut pas exposer le score local comme preuve admissible à une récompense.
-
-## Tests
-
-Node.js et Python 3, puis `npm ci --ignore-scripts` et `npm test`. Playwright 1.62.1 est verrouillé dans package-lock.json. Dans l'environnement cloud, Chromium est installé à `/usr/bin/chromium` ; ailleurs fournir `CHROMIUM_PATH` vers un Chromium installé. Le test lance son propre serveur sur le port 8765, puis le ferme. Ne pas utiliser ce port pour un autre service pendant le test. Captures sous `artifacts/`. Les hooks d'inspection sont injectés dans la réponse de test uniquement, jamais dans le HTML de production.
-
-24 contrôles Chromium réussis ; ce sont des tests sur navigateur avec viewport mobile, pas une validation sur téléphone physique. Le contrôle de trajectoire échoue sur la référence non corrigée (`REFERENCE=versions/v2-reference.html npm test`).
-
-## Préservation
-
-`versions/v1-reference.html`, `versions/v2-reference.html` et `versions/v2-before-stabilisation-2026-10-12.html` restent inchangés. Le ZIP original est conservé dans les pièces jointes de l'espace de travail. Avant une nouvelle modification, sauvegarder `current/index.html` et enregistrer la modification dans Git. L'environnement est déjà isolé : utiliser le checkout existant sans créer de worktree, sauf demande explicite.
-
-## Déploiement de cette étape
-
-`dist/defi-boreal-v2.1-stabilisation.zip` contient le frontend statique uniquement, avec index.html à sa racine. Décompresser et héberger son contenu sur Netlify ou un hébergement statique équivalent. Aucun build requis. Ce ZIP n'inclut pas de backend ou de récompenses. Aucun déploiement externe n'a été effectué.
-
-Le ZIP projet séparé contient sources, références, documentation, tests et captures, sans node_modules ni secrets. La V2.1 couvre l’audit et la stabilisation. La V3 ajoute les graphismes, la vitesse et le générateur décrits dans docs/V3.md ; backend, codes QR et portails restent hors de cette étape. Voir le plan pour les décisions commerciales avant production.
+Les gains restent désactivés tant que les services, les règles et le fournisseur SMS n’ont pas été approuvés et configurés. Ne pas fusionner cette branche ni publier en production sans validation du propriétaire.

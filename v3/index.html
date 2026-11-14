@@ -41,6 +41,12 @@ button:focus-visible{outline:3px solid #e9a15f;outline-offset:3px}button:disable
 @media(prefers-reduced-motion:reduce){button:active{transform:none}}
 .noelEdition{align-self:flex-start;margin:-5px 0 10px;padding:6px 12px;border:1px solid #ecc77b80;border-radius:30px;font-size:10px;letter-spacing:.22em;color:#f8dfaa;background:#142e32a8}#home h1 em{color:#eaa6a2}.foot{font-size:8px}@media(max-height:650px){.noelEdition{margin:0;padding:4px 9px;font-size:9px}}
 @media(max-height:500px) and (orientation:landscape){#home .panel>p:first-of-type{display:none}}
+/* Reward details stay outside the artwork and never cover the running game. */
+.hud.off ~ .reward-start-note{display:none}
+.reward-start-note{position:absolute;z-index:6;left:12px;right:12px;bottom:4px;text-align:center;font-size:10px;color:#fff;pointer-events:none}
+.reward-claim{position:absolute;z-index:8;inset:0;padding:22px;overflow-y:auto;background:#111d13f7;display:flex;flex-direction:column;justify-content:center;align-items:center}
+.reward-claim.off{display:none}.reward-claim .panel{max-width:410px;margin:auto}.reward-claim input{font:inherit;width:100%;padding:12px;margin:4px 0 10px;border:1px solid #efcd7a;border-radius:7px;background:#fff;color:#172b27;user-select:text}.reward-claim label{display:block;font-size:12px;text-align:left}.reward-claim label.consent{display:flex;gap:9px;align-items:flex-start}.reward-claim input[type=checkbox]{width:auto;flex:none;margin:3px}.reward-claim p{margin:12px auto}.reward-claim .reward-code{font-size:22px;overflow-wrap:anywhere;user-select:all;color:#efcd7a}.reward-claim button{font-size:11px}.reward-claim h2{font-size:28px}
+#rewardChallenge{position:absolute;z-index:9;top:12px;left:50%;transform:translateX(-50%)}
 </style></head><body><main id="app"><canvas id="game" aria-label="Jeu Le Défi Boréal"></canvas>
 <div class="hud off" id="hud"><div class="stat"><small>POINTS</small><strong id="score">0</strong><div class="rank" id="hudrank">Promeneur</div></div><button class="pause" id="pauseBtn" aria-label="Pause"><span class="pause-icon" aria-hidden="true"></span></button><div class="stat right"><small>RECORD</small><strong id="best">0</strong></div></div>
 <section class="overlay" id="home"><div class="panel"><div class="brand">LES BORÉALISTES</div><div class="orn">✦ ✦ ✦</div><h1>LE DÉFI <em>BORÉAL</em></h1><span class="noelEdition">NOËL BORÉAL</span><p>Une forêt enneigée. Des trésors des Fêtes. Une nouvelle expédition pour Jacques.</p><div class="tips"><div class="tip"><b>☝️</b>Deux sauts<br>maximum</div><div class="tip"><b>🎁</b>Récolte<br>les cadeaux</div><div class="tip"><b>🌲</b>Évite<br>les obstacles</div></div><button class="primary" id="start" disabled>PRÉPARATION…</button><button class="alt" id="how">COMMENT JOUER</button><p style="margin-bottom:0;font-size:11px">Record personnel : <strong id="homebest">0</strong> points</p></div></section>
@@ -48,6 +54,9 @@ button:focus-visible{outline:3px solid #e9a15f;outline-offset:3px}button:disable
 <section class="overlay off" id="paused"><div class="panel"><div class="brand">PETITE PAUSE</div><h2>La forêt t'attend.</h2><button class="primary" id="resume">CONTINUER</button><button class="alt" id="exit">QUITTER LA PARTIE</button></div></section>
 <section class="overlay off" id="over"><div class="panel"><div class="brand">FIN DE L'EXPÉDITION</div><div class="orn">✦ ✦ ✦</div><div class="scoreBig" id="finalScore">0</div><div class="pill" id="finalRank">Promeneur boréal</div><p id="feedback">Belle randonnée !</p><p style="font-size:11px">Meilleur score : <strong id="finalBest">0</strong></p><button class="primary" id="retry">REJOUER</button><button class="alt" id="menu">MENU PRINCIPAL</button></div></section>
 <section class="overlay off" id="assetError" role="alert"><div class="panel"><div class="brand">LE DÉFI BORÉAL</div><h2>La forêt se prépare.</h2><p id="assetErrorMessage">Les images du jeu n’ont pas pu être chargées. Vérifie ta connexion, puis réessaie.</p><button class="primary" id="reloadAssets">RÉESSAYER</button></div></section>
+<div id="rewardStartNote" class="reward-start-note" role="status" aria-live="polite"></div>
+<div id="rewardChallenge" aria-label="Vérification de sécurité"></div>
+<section id="rewardClaim" class="reward-claim off" aria-label="Récompense de la partie" aria-live="polite"></section>
 <div class="foot">ÉDITION DE NOËL · LES BORÉALISTES</div></main>
 <script src="noel-assets.js"></script>
 <script src="mechanics.js"></script>
@@ -117,6 +126,55 @@ function advanceFrame(dt){if(mode!=='playing'){accumulator=0;return}accumulator+
 function loop(t){const dt=last?Math.max(0,(t-last)/1000):0;last=t;if(mode!=='paused'){animationTime+=Math.min(dt,.05);collisionTimer=Math.max(0,collisionTimer-Math.min(dt,.05))}advanceFrame(dt);draw();requestAnimationFrame(loop)}
 function pause(){if(mode==='playing'){mode='paused';accumulator=0;show('paused')}}
 
+// The seasonal renderer is unchanged. Verified runs use the shared 120Hz core.
+// These adapters also keep the original offline engine available for practice.
+let sharedSession=null,queuedJump=false,clientReady=false,clientUnavailable=location.protocol==='file:';
+const playAvailability=()=>{for(const id of ['start','fromHow'])$(id).disabled=!assetsReady||(!clientReady&&!clientUnavailable)};
+window.addEventListener('boreal:rewards-client-ready',()=>{clientReady=true;playAvailability()});
+document.addEventListener('error',event=>{if(event.target?.id==='rewardsClient'){clientUnavailable=true;playAvailability()}},true);
+const offlineReset=reset,offlineUpdate=update,offlineJump=jump,offlineResize=resize;
+function syncSession(){
+ const s=sharedSession.state;
+ ({ground,elapsed,score,speed,spawn,collectSpawn,world,combo,comboTimer,obstacles,items,player}=s);
+ landingTimer=s.landingTimer;flash=s.flash;
+}
+reset=function(){if(window.BorealRewards)return window.BorealRewards.start();if(!clientUnavailable)return;offlineReset();const text='Entraînement local — aucune récompense monétaire.';$('rewardStartNote').textContent=text;window.BorealRewardMenu?.notify?.(text)};
+jump=function(){
+ if(!sharedSession)return offlineJump();
+ if(mode!=='playing'||player.jumps>=2||queuedJump)return;
+ queuedJump=true;
+ for(let i=0;i<9;i++)dust.push({x:player.x+14,y:player.y+player.h,vx:-35-Math.random()*110,vy:-20-Math.random()*85,t:.55});
+};
+update=function(dt){
+ if(!sharedSession)return offlineUpdate(dt);
+ if(mode!=='playing')return;
+ const active=sharedSession;
+ active.step(active.state,queuedJump);queuedJump=false;syncSession();
+ for(const it of items)if(it.taken)for(let i=0;i<9;i++)dust.push({x:it.x+it.w/2,y:it.y+it.h/2,vx:(Math.random()-.5)*120,vy:(Math.random()-.5)*130,t:.55});
+ for(const d of dust){d.x+=d.vx*dt;d.y+=d.vy*dt;d.t-=dt}dust=dust.filter(d=>d.t>0);
+ $('score').textContent=Math.floor(score).toLocaleString('fr-CA');$('hudrank').textContent=rank(score);
+ if(active.state.ended){end();active.onEnd?.(active.state)}
+};
+resize=function(){
+ homeHeroLayout=null;
+ if(!sharedSession)return offlineResize();
+ const r=canvas.getBoundingClientRect();W=Math.round(Math.max(160,Math.min(4096,r.width)));H=Math.round(Math.max(240,Math.min(4096,r.height)));
+ scale=Math.min(devicePixelRatio||1,2);canvas.width=Math.round(W*scale);canvas.height=Math.round(H*scale);ctx.setTransform(scale,0,0,scale,0,0);
+ const oldGround=ground;sharedSession.resize(sharedSession.state,W,H);syncSession();for(const d of dust)d.y+=ground-oldGround;
+};
+window.BorealGame=Object.freeze({
+ get ready(){return assetsReady},
+ dimensions:()=>({width:W,height:H}),
+ start(session){
+  if(!assetsReady)throw new Error('Les images se préparent.');
+  sharedSession=session;queuedJump=false;syncSession();dust=[];collisionTimer=0;accumulator=0;last=0;mode='playing';show(null);
+  $('score').textContent='0';$('hudrank').textContent=rank(0);
+ },
+ practice(){sharedSession=null;queuedJump=false;offlineReset()},
+ home(){mode='home';show('home')},
+ isPlaying:()=>mode==='playing'||mode==='paused'
+});
+window.addEventListener('boreal:menu-layout',()=>{homeHeroLayout=null});
 $('start').onclick=reset;$('fromHow').onclick=reset;$('retry').onclick=reset;
 $('how').onclick=()=>{mode='instructions';show('instructions')};$('back').onclick=()=>{mode='home';show('home')};
 $('pauseBtn').onclick=pause;
@@ -129,7 +187,10 @@ document.addEventListener('visibilitychange',()=>{if(document.hidden)pause()});
 window.addEventListener('blur',pause);
 $('reloadAssets').onclick=()=>location.reload();
 $('fromHow').disabled=true;
-Promise.all([window.JacquesNoelSprites.ready,window.BorealNoelScenery.ready]).then(()=>{assetsReady=true;canvas.dataset.ready='true';$('start').disabled=false;$('fromHow').disabled=false;$('start').textContent='JOUER →'}).catch(error=>{console.error('Chargement des images du jeu impossible',error);if(location.protocol==='file:')$('assetErrorMessage').textContent='Cette version utilise des fichiers séparés. Pour jouer sans installation, ouvre la version autonome du Défi Boréal. Tu peux aussi ouvrir le jeu depuis son site Web.';$('assetError').classList.remove('off')});
+Promise.all([window.JacquesNoelSprites.ready,window.BorealNoelScenery.ready]).then(()=>{assetsReady=true;canvas.dataset.ready='true';playAvailability();$('start').textContent='Commencer à jouer'}).catch(error=>{console.error('Chargement des images du jeu impossible',error);if(location.protocol==='file:')$('assetErrorMessage').textContent='Cette version utilise des fichiers séparés. Pour jouer sans installation, ouvre la version autonome du Défi Boréal. Tu peux aussi ouvrir le jeu depuis son site Web.';$('assetError').classList.remove('off')});
 resize();show('home');requestAnimationFrame(loop);
 })();
-</script></body></html>
+</script>
+<script src="menu-recompenses.js"></script>
+<script type="module" id="rewardsClient" src="rewards-client.js"></script>
+</body></html>

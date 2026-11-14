@@ -1,0 +1,41 @@
+name: Récompenses et administration
+on:
+  push:
+    branches: ['develop/noel-recompenses-v1']
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  rewards:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm ci --ignore-scripts
+      - run: npx playwright install --with-deps chromium
+      - name: Verify generated Pages worker
+        run: |
+          mkdir -p work
+          cp v3/_worker.js work/expected-worker.js
+          npm run build:pages
+          cmp work/expected-worker.js v3/_worker.js
+      - name: Server, races, browser and actual Pages runtime
+        run: |
+          export CHROMIUM_PATH="$(node -p "require('playwright').chromium.executablePath()")"
+          export BOREAL_SCREENSHOTS=1
+          npm run test:rewards
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: defi-boreal-rewards-browser
+          path: |
+            /tmp/boreal-rewards-menu-*.png
+            /tmp/admin-rewards-artifacts/
+          retention-days: 14

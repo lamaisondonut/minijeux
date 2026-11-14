@@ -12,7 +12,8 @@ const viewports=[{width:390,height:844},{width:320,height:568},{width:620,height
 const results=[],geometry=[];
 const check=(condition,message)=>{assert.ok(condition,message);results.push(message);console.log('PASS',message)};
 const hash=content=>createHash('sha256').update(content).digest('hex');
-const ready=page=>page.waitForFunction(()=>document.querySelector('#game').dataset.ready==='true');
+const ready=async page=>{await page.waitForFunction(()=>document.querySelector('#game').dataset.ready==='true'&&window.BorealRewards,undefined,{polling:20});await page.evaluate(()=>BorealRewardMenu.ready)};
+const pendingStatus=async route=>route.fulfill({json:{mode:'pending',rewardsEnabled:false,capCents:0,tiers:[]}});
 function functionSource(html,name){
  const start=html.indexOf('function '+name+'(');assert.ok(start>=0,'Fonction originale introuvable : '+name);
  let at=html.indexOf('{',start)+1,depth=1,quote=null,escaped=false;
@@ -95,6 +96,7 @@ const canvasHash=page=>page.evaluate(async()=>{
   const errors=[],external=[];
   for(const viewport of viewports){
    const context=await browser.newContext({viewport,isMobile:viewport.width<=390,hasTouch:viewport.width<=390});
+   await context.route('**/api/rewards/status',pendingStatus);
    await context.addInitScript(drawTracker);
    const page=await context.newPage();page.on('pageerror',error=>errors.push(error.message));
    page.on('request',request=>{if(!request.url().startsWith(origin)&&!request.url().startsWith('data:'))external.push(request.url())});
@@ -102,15 +104,17 @@ const canvasHash=page=>page.evaluate(async()=>{
    await page.goto(origin+'/v3/__home_test__.html');await ready(page);await page.waitForTimeout(150);
    await page.evaluate(()=>noelHomeTest.drawHero());
    const hero=await page.evaluate(()=>window.__homeHeroDraws.at(-1));
-   const title=await page.locator('#home h1').boundingBox(),start=await page.locator('#start').boundingBox(),how=await page.locator('#how').boundingBox();
+   const title=await page.locator('#home h1').boundingBox(),start=await page.locator('#start').boundingBox(),how=await page.locator('#how').boundingBox(),reward=await page.locator('.boreal-reward-info').boundingBox();
    const label=`${viewport.width}×${viewport.height}`;
    check(hero&&hero.mode==='home'&&hero.left>=0&&hero.top>=0&&hero.right<=viewport.width&&hero.bottom<=viewport.height,`Jacques entièrement visible au menu ${label}`);
    check(!overlaps(hero,title)&&!overlaps(hero,start)&&!overlaps(hero,how),`Jacques ne chevauche ni titre ni boutons ${label}`);
-   check([start,how].every(box=>box&&box.x>=0&&box.y>=0&&box.x+box.width<=viewport.width&&box.y+box.height<=viewport.height),`boutons visibles et accessibles ${label}`);
-   if(viewport.height>viewport.width)check(hero.height>80*1.45&&hero.bottom>viewport.height*.34,`Jacques plus grand et plus bas que l’ancien menu ${label}`);
-   geometry.push({viewport,hero,title,start,how});
+   check(!overlaps(hero,reward),`la carte de récompenses ne recouvre pas Jacques ${label}`);
+   for(const id of ['start','how','boreal-open-rules','rewardRecover']){await page.locator('#'+id).scrollIntoViewIfNeeded();const box=await page.locator('#'+id).boundingBox();check(box&&box.x>=-1&&box.y>=-1&&box.x+box.width<=viewport.width+1&&box.y+box.height<=viewport.height+1,`bouton ${id} accessible par défilement ${label}`)}
+   await page.evaluate(()=>{document.querySelector('#home').scrollTop=0;window.dispatchEvent(new Event('boreal:menu-layout'));noelHomeTest.draw()});
+   if(viewport.height>viewport.width)check(hero.height>80*1.45&&hero.bottom>title.y+title.height*.75,`Jacques conserve sa grande taille de menu à côté du titre ${label}`);
+   geometry.push({viewport,hero,title,start,how,reward});
    await page.screenshot({path:path.join(artifactDir,`menu-${viewport.width}x${viewport.height}.png`)});
-   await page.click('#start');await page.evaluate(()=>{noelHomeTest.quiet();noelHomeTest.drawHero()});
+   await page.click('#start');await page.waitForFunction(()=>noelHomeTest.state().mode==='playing',undefined,{polling:20});await page.evaluate(()=>{noelHomeTest.quiet();noelHomeTest.drawHero()});
    const gameHero=await page.evaluate(()=>window.__homeHeroDraws.at(-1));
    check(gameHero.mode==='playing'&&Math.abs(gameHero.scaleX-1)<1e-8&&Math.abs(gameHero.scaleY-1)<1e-8,`taille de Jacques en partie inchangée ${label}`);
    await page.click('#pauseBtn');await page.waitForTimeout(100);const before=await canvasHash(page);
@@ -120,6 +124,7 @@ const canvasHash=page=>page.evaluate(async()=>{
    await context.close();
   }
   const context=await browser.newContext({viewport:viewports[0]});
+  await context.route('**/api/rewards/status',pendingStatus);
   await context.addInitScript(()=>{window.requestAnimationFrame=()=>0});await context.addInitScript(drawTracker);
   const page=await context.newPage();page.on('pageerror',error=>errors.push(error.message));
   await page.route('**/v3/__home_test__.html',route=>route.fulfill({contentType:'text/html',body:instrument(html)}));
@@ -155,7 +160,7 @@ const canvasHash=page=>page.evaluate(async()=>{
   check(reducedNose[0].noseAlpha===reducedNose[1].noseAlpha&&reducedNose[0].x===reducedNose[1].x&&reducedNose[0].y===reducedNose[1].y,'la préférence de réduction des animations stabilise le traîneau et son nez');
   await context.close();
   for(const resource of ['noel-sleigh.js','assets/noel/santa-sleigh-six-reindeer.png']){
-   const unavailable=await browser.newContext({viewport:viewports[0]});let blocked=0;
+   const unavailable=await browser.newContext({viewport:viewports[0]});await unavailable.route('**/api/rewards/status',pendingStatus);let blocked=0;
    const url=new URL(resource,origin+'/v3/index.html').href;
    await unavailable.route(url,route=>{blocked++;return route.abort()});
    const failed=await unavailable.newPage();await failed.goto(origin+'/v3/index.html');await failed.locator('#assetError').waitFor({state:'visible'});
@@ -163,7 +168,7 @@ const canvasHash=page=>page.evaluate(async()=>{
    await unavailable.unroute(url);await failed.click('#reloadAssets');await ready(failed);check(await failed.locator('#start').isEnabled(),`${resource} rétabli permet de rejouer`);await unavailable.close();
   }
   check(errors.length===0,'aucune erreur JavaScript dans les scénarios normaux');
-  check(external.length===0,'aucune requête externe ni backend');
+  check(external.length===0,'aucun service externe ; seul le statut public local est consulté');
   fs.writeFileSync(path.join(artifactDir,'results.json'),JSON.stringify({checks:results.length,results,geometry,testedAt:new Date().toISOString(),chromiumVersion:browser.version(),viewports,limitations:['Chromium headless sous Linux ; aucun téléphone physique testé.','Le nombre de six rennes doit également être vérifié par revue visuelle de l’image PNG.','Les accès au moteur sont injectés dans la seule réponse HTTP de test.']},null,2)+'\n');
   console.log(`${results.length} contrôles menu et traîneau réussis.`);
  }finally{if(browser)await browser.close();server.kill()}
