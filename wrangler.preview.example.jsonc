@@ -1,0 +1,20 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "minijeux",
+  "pages_build_output_dir": "./v3",
+  "compatibility_date": "2026-11-14",
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "boreal-rewards-preview",
+    "database_id": "REMPLACER_PAR_ID_D1_PREVISUALISATION",
+    "migrations_dir": "./migrations"
+  }],
+  "vars": {
+    "REWARDS_ENABLED": "false",
+    "SMS_APPROVED": "false",
+    "TERMS_APPROVED": "false",
+    "SMS_PROVIDER": "twilio",
+    "SMS_DAILY_LIMIT": "0",
+    "APP_ORIGIN": "https://develop-noel-recompenses-v1.minijeux-4gy.pages.dev"
+  }
+}

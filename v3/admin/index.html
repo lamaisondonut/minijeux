@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="fr-CA">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow, noarchive">
+  <meta name="referrer" content="same-origin">
+  <title>Récompenses · Espace employés</title>
+  <link rel="stylesheet" href="/admin/admin.css">
+  <script src="/admin/admin.js" defer></script>
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="/admin/" aria-label="Accueil de l’espace employés">
+      <img class="borealistes-logo" src="/assets/branding/borealistes-logo.png" alt="Les Boréalistes" width="96" height="80">
+      <span class="brand-divider" aria-hidden="true"></span>
+      <img class="goat-logo" src="/assets/branding/goat-wordmark.png" alt="GOAT" width="99" height="42">
+    </a>
+    <div class="session">
+      <span id="employee-name"></span>
+      <a class="logout" href="/cdn-cgi/access/logout">Se déconnecter <span aria-hidden="true">↗</span></a>
+    </div>
+  </header>
+
+  <main class="page-shell">
+    <section id="access-panel" class="access-panel" aria-live="polite">
+      <span class="eyebrow">Espace employés</span>
+      <h1 id="access-title">Vérification de votre accès…</h1>
+      <p id="access-message">Veuillez patienter pendant la connexion à votre compte individuel.</p>
+      <p id="access-identity" hidden></p>
+      <a id="access-login" class="button primary" href="/admin/" hidden>Se connecter avec mon compte</a>
+      <button id="access-retry" class="button secondary" type="button" hidden>Réessayer</button>
+    </section>
+
+    <div id="admin-content" hidden>
+      <section class="page-intro">
+        <div>
+          <span class="eyebrow">Espace employés · Campagne de Noël</span>
+          <h1>Gestion des récompenses</h1>
+          <p>Validez le code, puis remettez la carte-cadeau en toute confiance.</p>
+        </div>
+        <a class="procedure-link" href="#procedure">Consulter la procédure <span aria-hidden="true">↓</span></a>
+      </section>
+
+      <section class="budget-panel" aria-label="Budget interne du mois">
+        <div class="budget-heading"><h2>Suivi du budget</h2><span id="budget-month">Chargement…</span><span class="internal-label">Usage interne</span></div>
+        <div id="budget-values" class="budget-grid" aria-busy="true">
+          <div><span class="metric-label">Budget disponible</span><strong id="budget-remaining">—</strong></div>
+          <div><span class="metric-label">Récompenses attribuées</span><strong id="budget-used">—</strong></div>
+          <div><span class="metric-label">Montant réservé</span><strong id="budget-reserved">—</strong></div>
+          <div><span class="metric-label">Codes à utiliser</span><strong id="budget-pending">—</strong></div>
+        </div>
+        <p id="budget-error" class="inline-error" hidden></p>
+      </section>
+
+      <div id="notification" class="notification" role="status" aria-live="polite" hidden></div>
+
+      <section class="workspace" aria-label="Recherche et traitement des récompenses">
+        <div class="rewards-panel surface">
+          <div class="section-heading"><div><span class="eyebrow">Registre</span><h2>Les récompenses</h2></div><button id="export-button" class="button text-button" type="button">Exporter CSV <span aria-hidden="true">↓</span></button></div>
+          <form id="search-form" class="search-form" role="search">
+            <div class="field search-field"><label for="code-search">Rechercher un code</label><div class="search-controls"><input id="code-search" type="search" name="code" maxlength="80" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="Saisir le code du client"><button class="button primary" type="submit">Rechercher</button></div></div>
+            <div class="field status-field"><label for="status-filter">Statut</label><select id="status-filter" name="status"><option value="">Tous les statuts</option><option value="pending">À utiliser</option><option value="claimed">En cours de remise</option><option value="issued">Carte remise</option><option value="expired">Code expiré</option><option value="cancelled">Annulé</option></select></div>
+          </form>
+          <div class="list-meta"><p id="result-count" role="status">Chargement des récompenses…</p><button id="refresh-button" class="refresh-button" type="button">Actualiser <span aria-hidden="true">↻</span></button></div>
+          <div class="list-heading" aria-hidden="true"><span>Client et code</span><span>Valeur</span><span>Statut</span></div>
+          <div id="reward-list" class="reward-list" aria-busy="true"></div>
+          <div id="list-state" class="empty-state" role="status"><span class="state-symbol" aria-hidden="true">…</span><h3>Chargement du registre</h3><p>Les données sont récupérées auprès du serveur.</p></div>
+          <button id="load-more" class="button secondary load-more" type="button" hidden>Afficher les suivantes</button>
+        </div>
+
+        <aside id="detail-panel" class="detail-panel surface" aria-label="Détail de la récompense">
+          <div id="detail-empty" class="detail-empty"><span class="detail-icon" aria-hidden="true">↖</span><span class="eyebrow">Détail d’une récompense</span><h2>Choisissez un code</h2><p>Recherchez le code présenté par le client, puis ouvrez sa fiche pour vérifier son statut.</p></div>
+          <div id="detail-content" hidden>
+            <div class="section-heading detail-heading"><span class="eyebrow">Fiche récompense</span><button id="close-detail" class="close-button" type="button" aria-label="Fermer la fiche">×</button></div>
+            <div class="detail-title"><span id="detail-status" class="status-badge"></span><h2 id="detail-name"></h2><p id="detail-code" class="reward-code"></p><strong id="detail-value" class="reward-value"></strong></div>
+            <dl id="detail-facts" class="detail-facts"></dl>
+            <div id="detail-action"></div>
+            <section class="audit-section" aria-label="Historique"><h3>Historique</h3><p id="audit-state" class="muted">Chargement de l’historique…</p><ol id="audit-list" class="audit-list"></ol></section>
+          </div>
+        </aside>
+      </section>
+
+      <details id="procedure" class="procedure surface">
+        <summary><span><span class="eyebrow">À garder sous la main</span><strong>La remise en 3 étapes</strong></span><span class="summary-chevron" aria-hidden="true">+</span></summary>
+        <div class="procedure-body">
+          <ol class="procedure-steps">
+            <li><span class="step-number">1</span><div><h3>Vérifier et utiliser le code</h3><p>Ouvrez sa fiche et vérifiez le nom, la valeur et la date limite. Cliquez sur « Marquer comme utilisé », puis confirmez. Attendez la validation du serveur avant de créer une carte.</p></div></li>
+            <li><span class="step-number">2</span><div><h3>Créer la carte dans Lightspeed</h3><p>Après la validation, créez manuellement une seule carte-cadeau du montant indiqué. Remettez-la au client. Cette page ne crée aucune carte dans Lightspeed.</p></div></li>
+            <li><span class="step-number">3</span><div><h3>Confirmer la remise</h3><p>Saisissez la référence Lightspeed, cochez la remise réelle au client et confirmez. Seul l’employé qui a utilisé le code peut terminer la remise.</p></div></li>
+          </ol>
+          <p class="procedure-note"><strong>En cas de doute, n’émettez pas une deuxième carte.</strong> Un code « En cours de remise » est déjà verrouillé. L’employé concerné doit reprendre sa fiche et vérifier Lightspeed. Si une erreur apparaît après confirmation, actualisez d’abord le registre.</p>
+          <p class="muted">La date limite de 30 jours concerne l’utilisation du code de récompense. Elle ne représente pas la date d’expiration de la carte-cadeau. Chaque employé utilise son compte individuel, puis se déconnecte sur un appareil partagé.</p>
+        </div>
+      </details>
+      <footer class="page-footer"><span>Les Boréalistes × GOAT</span><span>Accès réservé aux employés autorisés</span></footer>
+    </div>
+  </main>
+
+  <dialog id="claim-dialog" aria-labelledby="claim-dialog-title">
+    <form id="claim-form" class="dialog-content">
+      <span class="eyebrow">Validation du code</span>
+      <h2 id="claim-dialog-title">Marquer comme utilisé ?</h2>
+      <p id="claim-summary"></p>
+      <p>Cette action verrouille le code à votre nom et empêche une seconde utilisation. Créez la carte dans Lightspeed seulement après la confirmation du serveur.</p>
+      <p id="claim-dialog-error" class="inline-error" role="alert" hidden></p>
+      <div class="dialog-actions"><button id="claim-cancel" class="button secondary" type="button">Annuler</button><button id="claim-confirm" class="button primary" type="submit">Confirmer l’utilisation</button></div>
+    </form>
+  </dialog>
+  <noscript><p class="noscript">Activez JavaScript pour utiliser l’espace employés. Aucune récompense ne peut être traitée sans validation serveur.</p></noscript>
+</body>
+</html>
