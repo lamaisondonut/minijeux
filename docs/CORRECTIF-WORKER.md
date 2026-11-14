@@ -31,3 +31,7 @@ Pour reproduire exactement la configuration de compilation avec une date `2026-0
 Le parcours de gains réels exige toujours la D1 de prévisualisation et ses migrations, les comptes Access, Turnstile, les secrets et l'approbation du fournisseur SMS. Ces éléments ne sont pas activés par le correctif ; sans eux, le jeu reste jouable en entraînement et l'administration demeure fermée. Voir [configuration complète](RECOMPENSES-CLOUDFLARE.md).
 
 Références : [compatibilité Node Cloudflare](https://developers.cloudflare.com/workers/runtime-apis/nodejs/) ; [configuration Pages](https://developers.cloudflare.com/pages/functions/wrangler-configuration/).
+
+## Confirmation distante
+
+Cloudflare Pages confirme le déploiement réussi du commit `6a9454e` : [prévisualisation exacte](https://796cd2d0.minijeux-4gy.pages.dev/) et [alias de branche](https://develop-noel-recompenses-v1.minijeux-4gy.pages.dev/). Les anciens imports Node ont disparu et la publication de la Function n'échoue plus. Aucun drapeau du tableau de bord n'a été modifié. Le test distant via HTTP depuis cet environnement reste empêché par le proxy réseau ; distinguer cette limite du contrôle Cloudflare de publication, qui réussit.

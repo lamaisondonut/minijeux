@@ -8,13 +8,17 @@ Menu et logos officiels, moteur partagé et relecture serveur, migrations D1, r�
 
 Le dossier à publier reste **`v3`**. Les sources Functions sont compilées dans `v3/_worker.js`, vérifié dans le véritable moteur Cloudflare local. L’ancien HTML autonome ne comprend pas ce backend.
 
-## Prévisualisation distante : échec à diagnostiquer
+## Prévisualisation distante déployée
 
-La tentative automatique Cloudflare Pages du commit `0114369` a échoué. GitHub retourne seulement « Deploy failed », sans le motif ni les journaux détaillés. Aucun lien public fonctionnel de cette version n’est confirmé.
+Le correctif `6a9454e` supprime les couches Node injectées inutilement par la compilation. Cloudflare confirme désormais la publication réussie des fichiers et de la Function.
 
-[Ouvrir le journal privé du déploiement](https://dash.cloudflare.com/?to=/2d2a4ebb6477b2a2a128e12d87e36cd4/pages/view/minijeux/289a24cc-f036-48c9-a0e0-f74f1ab5c38b).
+- [Prévisualisation de la branche](https://develop-noel-recompenses-v1.minijeux-4gy.pages.dev/)
+- [Déploiement précis du correctif](https://796cd2d0.minijeux-4gy.pages.dev/)
+- [État Cloudflare du déploiement](https://dash.cloudflare.com/?to=/2d2a4ebb6477b2a2a128e12d87e36cd4/pages/view/minijeux/796cd2d0-d6e7-48c2-8de5-74174d4778f6)
 
-Un opérateur ayant accès au compte Cloudflare doit transmettre le message d’erreur de ce journal pour corriger précisément le déploiement. Ne pas attribuer cet échec à D1 ou au fournisseur SMS sans consulter le journal. L’environnement de travail ne possède pas d’identité ou de secrets du compte Cloudflare permettant de lire ce journal, créer D1, lier Access ou configurer les secrets distants.
+Le Worker exact charge sans recompilation sur sept configurations workerd, avec et sans Node. Le jeu et les routes privées ont été vérifiés dans le navigateur contre Pages/D1 local. L'accès HTTP direct à `*.pages.dev` depuis l'environnement de travail est bloqué par son proxy réseau ; la réussite distante est confirmée par le contrôle Cloudflare dans GitHub. Aucune navigation publique réussie n'est revendiquée depuis cet environnement.
+
+Les échecs initiaux sont conservés comme historique dans le [diagnostic du Worker](CORRECTIF-WORKER.md). Aucun changement manuel de `nodejs_compat` n'est nécessaire au fichier corrigé. La production reste inchangée.
 
 Pour essayer localement le menu et l’entraînement :
 
