@@ -12,7 +12,7 @@
     "build:pages": "node scripts/build-pages-worker.mjs",
     "test:rewards:unit": "node tests/game-session-engine.test.mjs && node --test tests/sms.test.mjs tests/sms-auth.test.mjs tests/rewards-api.test.mjs && node --no-warnings tests/d1-concurrency.test.mjs && node tests/branding.test.cjs",
     "test:rewards:browser": "node tests/rewards-client-browser.cjs && node tests/admin-rewards-browser.cjs",
-    "test:pages": "node tests/pages-worker-smoke.cjs",
+    "test:pages": "node tests/worker-startup.cjs && node tests/pages-worker-smoke.cjs",
     "test:rewards": "npm run test:rewards:unit && npm run test:rewards:browser && npm run test:pages"
   },
   "devDependencies": {

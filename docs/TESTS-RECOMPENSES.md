@@ -6,7 +6,7 @@ Réalisées localement le 14 novembre 2026, Node.js 24, Python 3, Chromium et Wr
 | --- | --- |
 | `npm run test:rewards:unit` | Moteur partagé : 143 contrôles. API : 13 scénarios. SMS : 6 scénarios. Authentification : 3 scénarios. Concurrence : 11 scénarios, vrais fichiers SQLite WAL et connexions indépendantes. Identité visuelle : quatre PNG identiques aux fichiers fournis. |
 | `npm run test:rewards:browser` | Client : 81 contrôles dans Chromium. Administration : 8 suites, téléphone/tablette/ordinateur, erreurs et concurrence entre employés. |
-| `npm run test:pages` | Migration dans D1 local via Wrangler, Worker Pages compilé exécuté par workerd, routes privées refusées, API publique sûre et vraie partie d’entraînement dans Chromium. |
+| `npm run test:pages` | Chargement du Worker brut dans workerd, sans recompilation, sur sept configurations avec/sans Node et plusieurs dates ; puis migration D1 locale, routes privées refusées, API sûre et partie d’entraînement dans Chromium. |
 | `npm run test:noel` | 740 assertions de mécanique, 137 contrôles Noël et 82 contrôles du menu/traîneau. |
 | `npm run build:pages` | Compilation Pages réussie ; génération reproductible comparée à l’artefact versionné. |
 

@@ -13,7 +13,7 @@ const cli = path.join(root,'node_modules/wrangler/bin/wrangler.js');
 const origin = 'http://127.0.0.1:8792';
 const env = {...process.env,CI:'true',WRANGLER_SEND_METRICS:'false',WRANGLER_LOG_PATH:path.join(temp,'wrangler.log')};
 const config = {
-  name:'boreal-local-test',pages_build_output_dir:path.join(root,'v3'),compatibility_date:'2026-11-14',
+  name:'boreal-local-test',pages_build_output_dir:path.join(root,'v3'),compatibility_date:'2026-11-14',compatibility_flags:['no_nodejs_compat','no_nodejs_compat_v2'],
   d1_databases:[{binding:'DB',database_name:'boreal-local-test',database_id:'00000000-0000-4000-8000-000000000001',migrations_dir:path.join(root,'migrations')}],
   vars:{REWARDS_ENABLED:'false',SMS_APPROVED:'false',TERMS_APPROVED:'false',APP_ORIGIN:origin},
 };
@@ -22,7 +22,7 @@ const persisted = path.join(temp,'state');
 const migrated = spawnSync(process.execPath,[cli,'d1','migrations','apply','DB','--local','--persist-to',persisted,'--config',path.join(temp,'wrangler.jsonc')],{cwd:root,env,encoding:'utf8'});
 assert.equal(migrated.status,0,migrated.stdout+migrated.stderr);
 let output='', browser;
-const worker = spawn(process.execPath,[cli,'pages','dev',path.join(root,'v3'),'--d1','DB=00000000-0000-4000-8000-000000000001','--binding','REWARDS_ENABLED=false','--binding','SMS_APPROVED=false','--binding','TERMS_APPROVED=false','--binding',`APP_ORIGIN=${origin}`,'--persist-to',persisted,'--port','8792','--ip','127.0.0.1','--inspector-port','0'],{cwd:temp,env,stdio:['ignore','pipe','pipe']});
+const worker = spawn(process.execPath,[cli,'pages','dev',path.join(root,'v3'),'--compatibility-date','2026-11-14','--compatibility-flags','no_nodejs_compat','no_nodejs_compat_v2','--d1','DB=00000000-0000-4000-8000-000000000001','--binding','REWARDS_ENABLED=false','--binding','SMS_APPROVED=false','--binding','TERMS_APPROVED=false','--binding',`APP_ORIGIN=${origin}`,'--persist-to',persisted,'--port','8792','--ip','127.0.0.1','--inspector-port','0'],{cwd:temp,env,stdio:['ignore','pipe','pipe']});
 worker.stdout.on('data',chunk=>{output+=chunk});worker.stderr.on('data',chunk=>{output+=chunk});
 (async()=>{
  try {

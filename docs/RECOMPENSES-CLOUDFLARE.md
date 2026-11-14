@@ -6,6 +6,8 @@ Ce document remplace les propositions historiques de `REWARDS_ARCHITECTURE.md` p
 
 ## Fichiers et hébergement
 
+Correctif de chargement : le Worker est compilé sans couches Node avec `no_nodejs_compat` et `no_nodejs_compat_v2`. Aucun `nodejs_compat` n'est requis par le serveur métier. Voir le [diagnostic, les tests et les réglages Preview](CORRECTIF-WORKER.md). Le fichier d'exemple n'est pas une configuration de production appliquée automatiquement.
+
 - Projet Pages existant : `minijeux`, hôte `minijeux-4gy.pages.dev`.
 - Base de prévisualisation prévue : `boreal-rewards-preview`, liaison D1 **`DB`**.
 - Exemple de configuration : [`wrangler.preview.example.jsonc`](../wrangler.preview.example.jsonc). L'identifiant D1 y est volontairement un espace réservé.
