@@ -22,4 +22,6 @@ L’administration est testée contre les accès 401/403, les échecs de service
 
 Les fournisseurs Turnstile, Twilio et les clés Access sont simulés **dans les tests uniquement**. Les signatures RSA, les opérations métier et le SQL sont réels. Aucun endpoint public de simulation ni compte administrateur de démonstration n’est livré. Les tests ne prouvent ni l’identité physique d’un détenteur de téléphone ni l’absence de robots capables de produire un journal cohérent.
 
+Les mêmes vérifications ont aussi réussi dans [GitHub Actions](https://github.com/lamaisondonut/minijeux/actions/runs/43647902354). Les contrôles Noël ont réussi sur la [pull request de prévisualisation](https://github.com/lamaisondonut/minijeux/pull/1). Les captures du menu et de l’administration sont disponibles dans les artefacts de ces exécutions.
+
 La prévisualisation publique sans liaisons/secrets reste jouable en entraînement. Le parcours monétaire et la connexion réelle du personnel nécessitent une D1 de prévisualisation, Access et un fournisseur SMS approuvé. Ces opérations distantes n’ont pas été exécutées faute d’accès au compte Cloudflare. Avant activation, effectuer une recette sur ces services configurés et finaliser les règles, les coûts et la confidentialité ; voir [configuration](RECOMPENSES-CLOUDFLARE.md).
