@@ -13,7 +13,7 @@
     "test:rewards:unit": "node tests/game-session-engine.test.mjs && node --no-warnings tests/sms.test.mjs && node --no-warnings tests/sms-auth.test.mjs && node --no-warnings tests/rewards-api.test.mjs && node --no-warnings tests/d1-concurrency.test.mjs && node tests/branding.test.cjs",
     "test:rewards:browser": "node tests/rewards-client-browser.cjs && node tests/admin-rewards-browser.cjs",
     "test:pages": "node tests/worker-startup.cjs && node tests/pages-worker-smoke.cjs && node tests/pages-rewards-integration.cjs",
-    "test:budget-proposals": "node --no-warnings tests/migration-budget.test.mjs && node --no-warnings tests/migration-reward-transitions.test.mjs && node --no-warnings tests/budget-api.test.mjs && node --no-warnings tests/manual-rewards.test.mjs && node --no-warnings tests/notification-sms.test.mjs",
+    "test:budget-proposals": "node --no-warnings tests/migration-budget.test.mjs && node --no-warnings tests/migration-reward-transitions.test.mjs && node --no-warnings tests/budget-api.test.mjs && node --no-warnings tests/manual-rewards.test.mjs && node --no-warnings tests/notification-sms.test.mjs && node --no-warnings tests/customer-data.test.mjs",
     "test:rewards": "npm run test:rewards:unit && npm run test:rewards:browser && npm run test:pages"
   },
   "devDependencies": {

@@ -1,4 +1,4 @@
-const POLICY_VERSION = "discounts-food-2026-11-v2";
+const POLICY_VERSION = "rewards-no-sms-2026-11-v1";
 const TIERS = Object.freeze([{ score: 5e3, valueCents: 500 }, { score: 7500, valueCents: 1e3 }, { score: 1e4, valueCents: 2e3 }]);
 const TTL = 30 * 60 * 1e3;
 const MAX_BODY = 128 * 1024;
@@ -114,13 +114,13 @@ function scoreValue(score) {
 }
 function rewardView(r, now = Date.now()) {
   if (!r) return null;
-  return { previewTestConsumed:r.preview_test_consumed===1,id: r.id, code: r.code, source:r.source||'game', foodOnlyConfirmed:r.food_only_confirmed===1, eligibleFoodCents:r.eligible_food_cents??null, appliedValueCents:r.applied_value_cents??null, unusedCents:r.applied_value_cents==null?null:r.value_cents-r.applied_value_cents, valueCents: r.value_cents, score: r.score, status: r.status === "pending" && r.claim_by <= now ? "expired" : r.status, discountApplied: r.discount_applied === 1, firstName: r.first_name, lastName: r.last_name, confirmedAt: iso(r.confirmed_at), claimBy: iso(r.claim_by), claimedAt: iso(r.claimed_at), claimedBy: r.claimed_by, claimedByName: r.claimed_by_name, issuedAt: iso(r.issued_at), issuedBy: r.issued_by, issuedByName: r.issued_by_name, cancelledByName: r.cancelled_by_name, lightspeedRef: r.lightspeed_ref, cancelledAt: iso(r.cancelled_at), cancelReason: r.cancel_reason };
+  return { previewTestConsumed:r.preview_test_consumed===1,id: r.id, code: r.code, phoneVerified:r.phone_verified===1,source:r.source||'game', foodOnlyConfirmed:r.food_only_confirmed===1, eligibleFoodCents:r.eligible_food_cents??null, appliedValueCents:r.applied_value_cents??null, unusedCents:r.applied_value_cents==null?null:r.value_cents-r.applied_value_cents, valueCents: r.value_cents, score: r.score, status: r.status === "pending" && r.claim_by <= now ? "expired" : r.status, discountApplied: r.discount_applied === 1, firstName: r.first_name, lastName: r.last_name, confirmedAt: iso(r.confirmed_at), claimBy: iso(r.claim_by), claimedAt: iso(r.claimed_at), claimedBy: r.claimed_by, claimedByName: r.claimed_by_name, issuedAt: iso(r.issued_at), issuedBy: r.issued_by, issuedByName: r.issued_by_name, cancelledByName: r.cancelled_by_name, lightspeedRef: r.lightspeed_ref, cancelledAt: iso(r.cancelled_at), cancelReason: r.cancel_reason };
 }
 function publicRewardView(r, now = Date.now()) {
   if (!r) return null;
   // A player's receipt must not disclose employee identities, internal notes,
   // or the restaurant's private Lightspeed transaction reference.
-  return { id: r.id, code: r.code, source:r.source||'game', foodOnlyConfirmed:r.food_only_confirmed===1, eligibleFoodCents:r.eligible_food_cents??null, appliedValueCents:r.applied_value_cents??null, unusedCents:r.applied_value_cents==null?null:r.value_cents-r.applied_value_cents, valueCents: r.value_cents, score: r.score, status: r.status === "pending" && r.claim_by <= now ? "expired" : r.status, discountApplied: r.discount_applied === 1, firstName: r.first_name, lastName: r.last_name, confirmedAt: iso(r.confirmed_at), claimBy: iso(r.claim_by), claimedAt: iso(r.claimed_at), issuedAt: iso(r.issued_at), cancelledAt: iso(r.cancelled_at) };
+  return { id: r.id, code: r.code, phoneVerified:r.phone_verified===1,source:r.source||'game', foodOnlyConfirmed:r.food_only_confirmed===1, eligibleFoodCents:r.eligible_food_cents??null, appliedValueCents:r.applied_value_cents??null, unusedCents:r.applied_value_cents==null?null:r.value_cents-r.applied_value_cents, valueCents: r.value_cents, score: r.score, status: r.status === "pending" && r.claim_by <= now ? "expired" : r.status, discountApplied: r.discount_applied === 1, firstName: r.first_name, lastName: r.last_name, confirmedAt: iso(r.confirmed_at), claimBy: iso(r.claim_by), claimedAt: iso(r.claimed_at), issuedAt: iso(r.issued_at), cancelledAt: iso(r.cancelled_at) };
 }
 export {
   ApiError,

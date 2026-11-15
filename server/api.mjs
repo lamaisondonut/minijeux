@@ -7,13 +7,23 @@ import { setupDiagnostics, rewardDatabaseReady } from "./setup.mjs";
 import { previewTestRedemption } from "./preview-test.mjs";
 import { sendRewardSms } from "./notification-sms.mjs";
 import { quoteManual, createManual } from "./manual-rewards.mjs";
+import { getRestrictions,publicRestriction,recordDuplicate,adminEligibility,grantException } from "./eligibility.mjs";
+import { phoneVerificationMode } from "./launch-mode.mjs";
+import { customerColumns,adminCustomerView,normalizeNameSearch } from "./customer.mjs";
+import { notificationConfigured } from "./notification-sms.mjs";
 import { getBudget, changeBudget } from "./budget.mjs";
 async function notifyInitial(env,reward,phone,actor) {
+  if(phoneVerificationMode(env)!=="sms")return {status:"disabled"};
   try {return await sendRewardSms(env,{reward,phone,actor,requestId:'initial_'+reward.id,kind:'initial'});}
   catch {return {status:'unavailable'};}
 }
 function ready(env) {
-  return !!(Number.isInteger(Number(env.SMS_DAILY_LIMIT)) && Number(env.SMS_DAILY_LIMIT) >= 1 && Number(env.SMS_DAILY_LIMIT) <= 100 && env.DB && originConfigured(env) && typeof env.REWARDS_HMAC_SECRET === "string" && env.REWARDS_HMAC_SECRET.length >= 32 && typeof env.TURNSTILE_SECRET === "string" && env.TURNSTILE_SECRET.length >= 10 && typeof env.TURNSTILE_SITE_KEY === "string" && env.TURNSTILE_SITE_KEY.length >= 5 && smsConfiguration(env).enabled);
+  const mode=phoneVerificationMode(env);
+  const base=!!(mode && env.REWARDS_ENABLED==='true' && env.TERMS_APPROVED==='true' && env.DB && originConfigured(env) && typeof env.REWARDS_HMAC_SECRET==='string' && env.REWARDS_HMAC_SECRET.length>=32 && typeof env.TURNSTILE_SECRET==='string' && env.TURNSTILE_SECRET.length>=10 && typeof env.TURNSTILE_SITE_KEY==='string' && env.TURNSTILE_SITE_KEY.length>=5);
+  return base && (mode==='unverified' || smsConfiguration(env).enabled);
+}
+function requireSmsMode(env) {
+  if(phoneVerificationMode(env)!=='sms')throw new ApiError(409,'sms_disabled','La réclamation actuelle ne demande aucun SMS.');
 }
 async function owner(request, env, required = true) {
   const raw = ownerCookie(request);
@@ -30,7 +40,7 @@ async function session(db, id, ownerHash) {
   return s;
 }
 function sessionView(s, expected) {
-  return { sessionId: s.id, seed: s.seed, width: s.width, height: s.height, mode: s.mode, engineVersion: s.engine_version, capCents: s.cap_cents, expiresAt: iso(s.expires_at), policyVersion: POLICY_VERSION, requiresModeConfirmation: expected !== s.mode };
+  return { sessionId: s.id, seed: s.seed, width: s.width, height: s.height, mode: s.mode, engineVersion: s.engine_version, capCents: s.cap_cents, expiresAt: iso(s.expires_at), phoneVerificationMode:s.phone_verification_mode||"sms", policyVersion: POLICY_VERSION, requiresModeConfirmation: expected !== s.mode };
 }
 async function verifyTurnstile(request, env, token) {
   if (typeof token !== "string" || token.length < 1 || token.length > 4096) throw new ApiError(400, "turnstile_required", "Veuillez terminer la v\xE9rification.");
@@ -46,7 +56,7 @@ async function verifyTurnstile(request, env, token) {
   if (!Number.isFinite(challengeAt) || challengeAt > Date.now() + 1e4 || Date.now() - challengeAt > 5 * 6e4 || result.success !== true || result.hostname !== new URL(env.APP_ORIGIN).hostname || result.action !== "boreal-session") throw new ApiError(403, "turnstile_failed", "V\xE9rification refus\xE9e.");
 }
 async function publicStatus(env, now) {
-  if (!ready(env)) return json({ mode: "pending", rewardsEnabled: false, tiers: TIERS.map((t) => ({ ...t, available: false })), policyVersion: POLICY_VERSION, turnstileSiteKey: null, reason: "configuration_pending" });
+  if (!ready(env)) return json({ phoneVerificationMode:phoneVerificationMode(env),mode: "pending", rewardsEnabled: false, tiers: TIERS.map((t) => ({ ...t, available: false })), policyVersion: POLICY_VERSION, turnstileSiteKey: null, reason: "configuration_pending" });
   const w = monthWindow(now);
   try {
     if (!await rewardDatabaseReady(env.DB)) throw new ApiError(503, "schema_unavailable");
@@ -55,11 +65,11 @@ async function publicStatus(env, now) {
     const remaining = budget.remainingCents;
     const cutoff = now >= w.end - TTL - 6e4;
     const cap = cutoff ? 0 : remaining >= 2e3 ? 2e3 : remaining >= 1e3 ? 1e3 : remaining >= 500 ? 500 : 0;
-    const quota=await stmt(env.DB,"SELECT count+reserved total FROM sms_daily WHERE day=?",torontoDay(now)).first();
-    if(cap>0&&quota?.total>=Number(env.SMS_DAILY_LIMIT))return json({mode:"pending",rewardsEnabled:false,tiers:TIERS.map(t=>({...t,available:false})),policyVersion:POLICY_VERSION,turnstileSiteKey:null,reason:"verification_unavailable"});
-    return json({ mode: cap ? "rewards" : "extreme", rewardsEnabled: true, tiers: TIERS.map((t) => ({ ...t, available: t.valueCents <= cap })), capCents: cap, policyVersion: POLICY_VERSION, turnstileSiteKey: env.TURNSTILE_SITE_KEY, ...cutoff ? { reason: "month_closing" } : !cap ? { reason: "rewards_unavailable" } : {} });
+    const quota=phoneVerificationMode(env)==="sms"?await stmt(env.DB,"SELECT count+reserved total FROM sms_daily WHERE day=?",torontoDay(now)).first():null;
+    if(phoneVerificationMode(env)==="sms"&&cap>0&&quota?.total>=Number(env.SMS_DAILY_LIMIT))return json({mode:"pending",rewardsEnabled:false,tiers:TIERS.map(t=>({...t,available:false})),policyVersion:POLICY_VERSION,turnstileSiteKey:null,reason:"verification_unavailable"});
+    return json({ phoneVerificationMode:phoneVerificationMode(env),mode: cap ? "rewards" : "extreme", rewardsEnabled: true, tiers: TIERS.map((t) => ({ ...t, available: t.valueCents <= cap })), capCents: cap, policyVersion: POLICY_VERSION, turnstileSiteKey: env.TURNSTILE_SITE_KEY, ...cutoff ? { reason: "month_closing" } : !cap ? { reason: "rewards_unavailable" } : {} });
   } catch {
-    return json({ mode: "pending", rewardsEnabled: false, tiers: TIERS.map((t) => ({ ...t, available: false })), policyVersion: POLICY_VERSION, turnstileSiteKey: null, reason: "service_unavailable" });
+    return json({ phoneVerificationMode:phoneVerificationMode(env),mode: "pending", rewardsEnabled: false, tiers: TIERS.map((t) => ({ ...t, available: false })), policyVersion: POLICY_VERSION, turnstileSiteKey: null, reason: "service_unavailable" });
   }
 }
 async function start(request, env, body, now) {
@@ -69,6 +79,8 @@ async function start(request, env, body, now) {
   if (!["rewards", "extreme"].includes(body.expectedMode)) throw new ApiError(400, "invalid_mode");
   const raw = ownerCookie(request) || secureId(32);
   const ownerHash = await privateHmac(env, "owner", raw);
+  const restriction=await getRestrictions(env.DB,{deviceHash:ownerHash,now});
+  if(restriction.device.blocked)return json({playOnly:true,rewardRestriction:publicRestriction(restriction)},200,{"Set-Cookie":cookie(raw)});
   const ip = await ipHash(request, env);
   await rateLimit(env.DB, [{ key: `start:o:${ownerHash}`, windowMs: TTL, limit: 6 }, { key: `start:i:${ip}`, windowMs: 36e5, limit: 30 }], now);
   await cleanup(env.DB, now);
@@ -78,8 +90,9 @@ async function start(request, env, body, now) {
   const allow = now < w.end - TTL - 6e4;
   const budget = await getBudget(env.DB, { month: w.month, now });
   const potentiallyAvailable = allow && budget.remainingCents >= 500;
-  const daily=await stmt(env.DB,"SELECT count+reserved total FROM sms_daily WHERE day=?",torontoDay(now)).first();
-  if(potentiallyAvailable&&daily?.total>=Number(env.SMS_DAILY_LIMIT))throw new ApiError(503,"sms_daily_limit","Les récompenses sont temporairement indisponibles.");
+  const smsMode=phoneVerificationMode(env)==="sms";
+  const daily=smsMode?await stmt(env.DB,"SELECT count+reserved total FROM sms_daily WHERE day=?",torontoDay(now)).first():null;
+  if(smsMode&&potentiallyAvailable&&daily?.total>=Number(env.SMS_DAILY_LIMIT))throw new ApiError(503,"sms_daily_limit","Les récompenses sont temporairement indisponibles.");
   let verified = false;
   if (allow && (potentiallyAvailable || body.turnstileToken)) {
     await verifyTurnstile(request, env, body.turnstileToken);
@@ -87,7 +100,7 @@ async function start(request, env, body, now) {
   }
   const startedAt=Date.now();
   const startedWindow=monthWindow(startedAt);
-  const s = await startSession(env.DB, { id: secureId(), ownerHash, seed: crypto.getRandomValues(new Uint32Array(1))[0], width: body.width, height: body.height, engineVersion: ENGINE_VERSION, month: startedWindow.month, now: startedAt, expiresAt: Math.min(startedAt + TTL, startedWindow.end), allowRewards: verified && startedAt < startedWindow.end - TTL - 6e4,quotaDay:torontoDay(startedAt),quotaLimit:Number(env.SMS_DAILY_LIMIT) });
+  const s = await startSession(env.DB, { id: secureId(), ownerHash, seed: crypto.getRandomValues(new Uint32Array(1))[0], width: body.width, height: body.height, engineVersion: ENGINE_VERSION, month: startedWindow.month, now: startedAt, expiresAt: Math.min(startedAt + TTL, startedWindow.end), allowRewards: verified && startedAt < startedWindow.end - TTL - 6e4,quotaDay:smsMode?torontoDay(startedAt):null,quotaLimit:smsMode?Number(env.SMS_DAILY_LIMIT):0,phoneVerificationMode:phoneVerificationMode(env) });
   return json(sessionView(s, body.expectedMode), 200, { "Set-Cookie": cookie(raw) });
 }
 async function finish(request, env, body, now) {
@@ -118,17 +131,20 @@ async function finish(request, env, body, now) {
   }
   const eligible = s.mode === "rewards" && s.reservation_active === 1 && scoreValue(result.score) > 0;
   const deadline = eligible ? Math.min(finishedAt + 10 * 6e4, s.expires_at) : null;
-  const value = { score: result.score, eligible, mode: s.mode, capCents: s.cap_cents, ...eligible ? { claimDeadline: iso(deadline) } : {} };
+  const restriction=eligible?await getRestrictions(env.DB,{deviceHash:ownerHash,now:finishedAt}):null;
+  const value = { ...(restriction?.blocked?{rewardRestriction:publicRestriction(restriction)}:{}),score: result.score, eligible, mode: s.mode, capCents: s.cap_cents, ...eligible ? { claimDeadline: iso(deadline) } : {} };
   await stmt(env.DB, "UPDATE sessions SET state=?,score=?,finish_json=?,claim_deadline=?,reservation_active=? WHERE id=? AND state='started'", eligible ? "eligible" : "lost", result.score, JSON.stringify(value), deadline, eligible ? 1 : 0, s.id).run();
   const stored = await session(env.DB, s.id, ownerHash);
   if(!stored.finish_json)throw new ApiError(409,"session_unavailable");
   return json(JSON.parse(stored.finish_json));
 }
 async function smsRequest(request, env, body, now) {
+  requireSmsMode(env);
   if (!ready(env)) throw new ApiError(503, "configuration_pending");
   if (!await rewardDatabaseReady(env.DB)) throw new ApiError(503, "service_unavailable", "Service temporairement indisponible.");
   const ownerHash = await owner(request, env);
   const s = await session(env.DB, body.sessionId, ownerHash);
+  if(s.phone_verification_mode!=="sms")throw new ApiError(409,"verification_mode_changed");
   if (s.state !== "eligible" || s.reservation_active !== 1 || s.expires_at <= now || s.claim_deadline <= now) throw new ApiError(409, "session_not_eligible", "Cette partie ne peut plus confirmer une r\xE9compense.");
   if (body.consentVersion !== POLICY_VERSION) throw new ApiError(400, "consent_required");
   const firstName = string(body.firstName, "first_name", 80);
@@ -169,6 +185,7 @@ async function smsRequest(request, env, body, now) {
   return json({ challengeId: token, expiresAt: iso(expiresAt),nextSendAt:iso(now+60000),sendsRemaining:5-(s.verification_send_count+1),claimDeadline:iso(s.claim_deadline) });
 }
 async function smsVerify(request, env, body, now) {
+  requireSmsMode(env);
   if (!ready(env)) throw new ApiError(503, "configuration_pending");
   if (!await rewardDatabaseReady(env.DB)) throw new ApiError(503, "service_unavailable", "Service temporairement indisponible.");
   const ownerHash = await owner(request, env);
@@ -179,6 +196,7 @@ async function smsVerify(request, env, body, now) {
   const c = await stmt(env.DB, "SELECT * FROM challenges WHERE id=? AND owner_hash=? AND session_id=? AND phone_hash=?", signed.challengeId, ownerHash, signed.sessionId, phoneHash).first();
   if (!c || c.expires_at <= now) throw new ApiError(410, "challenge_expired");
   const s = await session(env.DB, c.session_id, ownerHash);
+  if(s.phone_verification_mode!=="sms")throw new ApiError(409,"verification_mode_changed");
   const existing = await stmt(env.DB, "SELECT * FROM rewards WHERE session_id=?", s.id).first();
   if (existing) {
     if (existing.phone_hash !== phoneHash) throw new ApiError(409, "session_consumed");
@@ -204,9 +222,36 @@ async function smsVerify(request, env, body, now) {
   }
   const completionNow = Date.now();
   if (completionNow >= s.expires_at || completionNow >= s.claim_deadline || completionNow >= c.expires_at) throw new ApiError(410, "challenge_expired");
-  const result = await award(env.DB, { sessionId:s.id,ownerHash,phoneHash,now:completionNow,challengeId:c.id,challengeRevision:c.revision,firstName:c.first_name,lastName:c.last_name });
+  const rewardId=secureId();
+  const contact=await customerColumns(env,{phone,firstName:c.first_name,lastName:c.last_name,rewardId});
+  const result = await award(env.DB, { sessionId:s.id,ownerHash,phoneHash,now:completionNow,challengeId:c.id,challengeRevision:c.revision,firstName:c.first_name,lastName:c.last_name,id:rewardId,customer:contact });
   if(!result.reward && result.reason==='session_unavailable')throw new ApiError(409,"verification_replaced","La vérification a changé ou son délai est écoulé. Utilisez la dernière demande.");
   return json({ awarded: !!result.reward, score: s.score, ...result.reward ? { reward: publicRewardView(result.reward, completionNow), notification:await notifyInitial(env,result.reward,phone,ownerHash) } : { reason: result.reason } });
+}
+async function directClaim(request,env,body,now) {
+  if(!ready(env))throw new ApiError(503,'configuration_pending','Les récompenses sont temporairement indisponibles.');
+  if(phoneVerificationMode(env)!=='unverified')throw new ApiError(409,'sms_verification_required','Cette partie exige une vérification SMS.');
+  if(!await rewardDatabaseReady(env.DB))throw new ApiError(503,'schema_unavailable');
+  const ownerHash=await owner(request,env);
+  const s=await session(env.DB,body.sessionId,ownerHash);
+  if(s.phone_verification_mode!=='unverified')throw new ApiError(409,'verification_mode_changed');
+  const phone=normalizePhone(body.phone),phoneHash=await privateHmac(env,'phone',phone);
+  const firstName=string(body.firstName,'first_name',80),lastName=string(body.lastName,'last_name',80);
+  if(body.consentVersion!==POLICY_VERSION)throw new ApiError(400,'consent_required');
+  const existing=await stmt(env.DB,'SELECT * FROM rewards WHERE session_id=?',s.id).first();
+  if(existing){
+    if(existing.phone_hash!==phoneHash)throw new ApiError(409,'session_consumed','Cette partie a déjà attribué son code.');
+    return json({awarded:true,score:existing.score,reward:publicRewardView(existing,now)},200,{"Set-Cookie":cookie(ownerCookie(request))});
+  }
+  if(s.state!=='eligible'||s.reservation_active!==1||s.expires_at<=now||s.claim_deadline<=now)throw new ApiError(409,'session_not_eligible','Cette partie ne peut plus confirmer une récompense.');
+  const ip=await ipHash(request,env);
+  await rateLimit(env.DB,[{key:'claim:o:'+ownerHash,windowMs:3600000,limit:10},{key:'claim:p:'+phoneHash,windowMs:86400000,limit:10},{key:'claim:i:'+ip,windowMs:3600000,limit:30}],now);
+  const restriction=await getRestrictions(env.DB,{phoneHash,deviceHash:ownerHash,now:Date.now()});
+  if(restriction.blocked){await recordDuplicate(env.DB,{restriction,ownerHash,firstName,lastName,now:Date.now()});return json({error:restriction.reason,message:'Tu as déjà remporté une récompense au cours des 30 derniers jours. Tu peux continuer à jouer autant que tu le souhaites !',nextEligibleAt:restriction.nextEligibleAt},409);}
+  const id=secureId(),customer=await customerColumns(env,{phone,firstName,lastName,rewardId:id});
+  const result=await award(env.DB,{id,sessionId:s.id,ownerHash,phoneHash,now:Date.now(),firstName,lastName,customer,unverifiedProfile:true});
+  if(!result.reward){if(['phone_cooldown','device_cooldown'].includes(result.reason)){const restriction=await getRestrictions(env.DB,{phoneHash,deviceHash:ownerHash,now:Date.now()});await recordDuplicate(env.DB,{restriction,ownerHash,firstName,lastName,now:Date.now()});return json({error:result.reason,message:'Tu as déjà remporté une récompense au cours des 30 derniers jours. Tu peux continuer à jouer autant que tu le souhaites !',nextEligibleAt:restriction.nextEligibleAt},409);}throw new ApiError(409,'session_consumed','Cette partie ne peut plus attribuer de code.');}
+  return json({awarded:true,score:result.reward.score,reward:publicRewardView(result.reward,now)},200,{"Set-Cookie":cookie(ownerCookie(request))});
 }
 async function adminRate(request, env, employee, path, now) {
   const staff = await privateHmac(env, "staff", employee.sub);
@@ -231,7 +276,7 @@ async function adminApi(request, env, path, body, now, url) {
     return json(await setupDiagnostics(env, now));
   }
   await adminRate(request, env, employee, path, now);
-  if (path === "/api/admin/me" && request.method === "GET") return json({ employee: { ...employee, subject: employee.sub },previewTestRedemption:previewTestRedemption(env) });
+  if (path === "/api/admin/me" && request.method === "GET") return json({ employee: { ...employee, subject: employee.sub },previewTestRedemption:previewTestRedemption(env),phoneVerificationMode:phoneVerificationMode(env),notificationSmsEnabled:phoneVerificationMode(env)==="sms"&&notificationConfigured(env) });
   if (path === "/api/admin/budget" && request.method === "GET") {
     await cleanup(env.DB, now);
     const { month } = monthWindow(now);
@@ -260,6 +305,17 @@ async function adminApi(request, env, path, body, now, url) {
   if ((path === "/api/admin/rewards" || path === "/api/admin/export") && request.method === "GET") {
     const conditions = [];
     const args = [];
+    const search=url.searchParams.get('search');
+    if(search){
+      const term=string(search,'search',200),normal=normalizeNameSearch(term),like='%'+normal.replace(/[\\%_]/g,c=>'\\'+c)+'%';
+      const parts=["code=?","name_search LIKE ? ESCAPE '\\'"];
+      args.push(term.trim().toUpperCase(),like);
+      if(/^[+()\d .-]+$/.test(term)){
+        const digits=term.replace(/\D/g,'');
+        if(digits.length>=8){const candidate=term.trim().startsWith('+')?term:(digits.length===10?'+1'+digits:'+'+digits);try{const normalized=normalizePhone(candidate);parts.push('phone_hash=?');args.push(await privateHmac(env,'phone',normalized));}catch{}}
+      }
+      conditions.push('('+parts.join(' OR ')+')');
+    }
     const code = url.searchParams.get("code");
     const status = url.searchParams.get("status");
     const cursor = url.searchParams.get("cursor");
@@ -297,23 +353,30 @@ async function adminApi(request, env, path, body, now, url) {
         if (/^[\s]*[=+@\-\t\r]/.test(text)) text = "'" + text;
         return '"' + text.replaceAll('"', '""') + '"';
       };
-      const fields = ["id", "code", "score", "valueCents", "status", "source", "discountApplied", "foodOnlyConfirmed", "eligibleFoodCents", "appliedValueCents", "unusedCents", "firstName", "lastName", "confirmedAt", "claimBy", "claimedBy", "claimedByName", "claimedAt", "issuedBy", "issuedByName", "issuedAt", "cancelledByName", "cancelledAt", "lightspeedRef", "cancelReason"];
+      const fields = ["id", "code", "score", "valueCents", "status", "source", "discountApplied", "foodOnlyConfirmed", "eligibleFoodCents", "appliedValueCents", "unusedCents", "firstName", "lastName", "fullName", "phone", "phoneVerified", "confirmedAt", "claimBy", "claimedBy", "claimedByName", "claimedAt", "issuedBy", "issuedByName", "issuedAt", "cancelledByName", "cancelledAt", "lightspeedRef", "cancelReason"];
       await stmt(env.DB, "INSERT INTO audit(action,actor_sub,actor_name,created_at,details) VALUES('export',?,?,?,?)", employee.sub, employee.name, now, JSON.stringify({ count: rows.length })).run();
-      const csv = "\uFEFF" + [fields.map(escape).join(","), ...rows.map((r) => {
-        const value = rewardView(r, now);
-        return fields.map((k) => escape(value[k])).join(",");
-      })].join("\r\n");
+      const privateRows=await Promise.all(rows.map(r=>adminCustomerView(env,r,now)));
+      const csv = "\uFEFF" + [fields.map(escape).join(","), ...privateRows.map(value=>fields.map(k=>escape(value[k])).join(","))].join("\r\n");
       return new Response(csv, { headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": 'attachment; filename="recompenses.csv"', "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
     }
     const more = rows.length > 100;
     const page = rows.slice(0, 100);
     const last = page.at(-1);
-    return json({ rewards: page.map((r) => rewardView(r, now)), ...more ? { nextCursor: `${last.confirmed_at}:${last.id}` } : {} });
+    return json({ rewards: await Promise.all(page.map((r) => adminCustomerView(env,r,now))), ...more ? { nextCursor: `${last.confirmed_at}:${last.id}` } : {} });
+  }
+  const eligibilityMatch=path.match(/^\/api\/admin\/rewards\/([A-Za-z0-9_-]{20,128})\/(eligibility|unlock)$/);
+  if(eligibilityMatch){
+    const [,id,action]=eligibilityMatch;
+    const reward=await stmt(env.DB,'SELECT * FROM rewards WHERE id=?',id).first();if(!reward)throw new ApiError(404,'reward_not_found');
+    if(action==='eligibility'&&request.method==='GET')return json(await adminEligibility(env.DB,reward,now));
+    if(action==='unlock'&&request.method==='POST'){if(employee.role!=='manager')throw new ApiError(403,'manager_required');return json(await grantException(env.DB,employee,reward,body,now));}
+    throw new ApiError(405,'method_not_allowed');
   }
   const match = path.match(/^\/api\/admin\/rewards\/([A-Za-z0-9_-]{20,128})\/(claim|use|issue|cancel|notify)$/);
   if (match && request.method === "POST") {
     const [, id, action] = match;
     if (action === "notify") {
+      requireSmsMode(env);
       const reward=await stmt(env.DB,"SELECT * FROM rewards WHERE id=?",id).first();
       if(!reward)throw new ApiError(404,"reward_not_found");
       return json({notification:await sendRewardSms(env,{reward,phone:body.phone,actor:employee.sub,requestId:body.requestId})});
@@ -341,10 +404,10 @@ async function adminApi(request, env, path, body, now, url) {
     if (!result) {
       const old = await stmt(env.DB, "SELECT * FROM rewards WHERE id=?", id).first();
       if (!old) throw new ApiError(404, "reward_not_found");
-      if (action === "claim" && old.status === "claimed" && old.claimed_by === employee.sub || action === "use" && old.status === "issued" && old.issued_by === employee.sub && (body.previewTestConsumed===true && previewTestRedemption(env) && old.preview_test_consumed===1 || body.previewTestConsumed!==true && old.discount_applied === 1 && old.food_only_confirmed === 1 && old.eligible_food_cents === body.eligibleFoodCents) || action === "cancel" && old.status === "cancelled") return json({ reward: rewardView(old, now) });
+      if (action === "claim" && old.status === "claimed" && old.claimed_by === employee.sub || action === "use" && old.status === "issued" && old.issued_by === employee.sub && (body.previewTestConsumed===true && previewTestRedemption(env) && old.preview_test_consumed===1 || body.previewTestConsumed!==true && old.discount_applied === 1 && old.food_only_confirmed === 1 && old.eligible_food_cents === body.eligibleFoodCents) || action === "cancel" && old.status === "cancelled") return json({ reward: await adminCustomerView(env,old,now) });
       throw new ApiError(409, "reward_conflict", "Ce bon de rabais a déjà été traité, est expiré ou appartient à un autre employé.");
     }
-    return json({ reward: rewardView(result, now) });
+    return json({ reward: await adminCustomerView(env,result,now) });
   }
   throw new ApiError(404, "not_found");
 }
@@ -363,6 +426,7 @@ async function handleRequest(request, env) {
     }
     if (path.startsWith("/api/admin/")) return await adminApi(request, env, path, body, now, url);
     if (path === "/api/rewards/notification" && request.method === "POST") {
+      requireSmsMode(env);
       const ownerHash=await owner(request,env);
       if(!validId(body.rewardId))throw new ApiError(400,"invalid_reward");
       const reward=await stmt(env.DB,"SELECT r.* FROM rewards r JOIN sessions s ON s.id=r.session_id WHERE r.id=? AND s.owner_hash=?",body.rewardId,ownerHash).first();
@@ -379,6 +443,7 @@ async function handleRequest(request, env) {
     if (request.method !== "POST") throw new ApiError(405, "method_not_allowed");
     if (path === "/api/games/start") return await start(request, env, body, now);
     if (path === "/api/games/finish") return await finish(request, env, body, now);
+    if (path === "/api/rewards/claim") return await directClaim(request,env,body,now);
     if (path === "/api/rewards/sms/request") return await smsRequest(request, env, body, now);
     if (path === "/api/rewards/sms/verify") return await smsVerify(request, env, body, now);
     throw new ApiError(404, "not_found");

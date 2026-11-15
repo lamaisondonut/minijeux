@@ -44,7 +44,7 @@ class D1 {
   }
 }
 function environment() {
-  return { DB: new D1(), APP_ORIGIN: "https://game.example", REWARDS_ENABLED: "true", SMS_APPROVED: "true", TERMS_APPROVED: "true", SMS_PROVIDER: "twilio", SMS_DAILY_LIMIT: "10", REWARDS_HMAC_SECRET: "a".repeat(48), TURNSTILE_SITE_KEY: "site-key-public", TURNSTILE_SECRET: "secret-turnstile", TWILIO_ACCOUNT_SID: "AC" + "1".repeat(32), TWILIO_AUTH_TOKEN: "token".repeat(8), TWILIO_VERIFY_SERVICE_SID: "VA" + "2".repeat(32), ACCESS_TEAM_DOMAIN: "api-tests.cloudflareaccess.com", ACCESS_AUD: "rewards-audience" };
+  return { DB: new D1(), APP_ORIGIN: "https://game.example", REWARDS_ENABLED: "true", PHONE_VERIFICATION_MODE:"sms", SMS_APPROVED: "true", TERMS_APPROVED: "true", SMS_PROVIDER: "twilio", SMS_DAILY_LIMIT: "10", REWARDS_HMAC_SECRET: "a".repeat(48), TURNSTILE_SITE_KEY: "site-key-public", TURNSTILE_SECRET: "secret-turnstile", TWILIO_ACCOUNT_SID: "AC" + "1".repeat(32), TWILIO_AUTH_TOKEN: "token".repeat(8), TWILIO_VERIFY_SERVICE_SID: "VA" + "2".repeat(32), ACCESS_TEAM_DOMAIN: "api-tests.cloudflareaccess.com", ACCESS_AUD: "rewards-audience" };
 }
 const rawOwner = "o".repeat(43);
 const ownerHeader = `__Host-rewards-owner=${rawOwner}`;
@@ -59,7 +59,7 @@ async function ownedGame(env, { cap = 2e3, offset = 0, owner = rawOwner } = {}) 
   const created = now - Math.ceil(fixture.ticks / 120 * 1e3) - 1e3 + offset;
   const month = monthWindow(created).month;
   if (cap !== 2e3) env.DB.sqlite.prepare("INSERT OR REPLACE INTO budgets(month,used_cents,reserved_cents) VALUES(?,?,0)").run(month, 1e4 - cap);
-  return startSession(env.DB, { id: secureId(), ownerHash, seed: fixture.seed, width: fixture.width, height: fixture.height, engineVersion: fixture.engineVersion, month, now: created, expiresAt: now + 20 * 6e4, allowRewards: true, quotaDay:torontoDay(created), quotaLimit:Number(env.SMS_DAILY_LIMIT) });
+  return startSession(env.DB, { id: secureId(), ownerHash, seed: fixture.seed, width: fixture.width, height: fixture.height, engineVersion: fixture.engineVersion, month, now: created, expiresAt: now + 20 * 6e4, allowRewards: true, quotaDay:torontoDay(created), quotaLimit:Number(env.SMS_DAILY_LIMIT),phoneVerificationMode:env.PHONE_VERIFICATION_MODE??"unverified" });
 }
 const replay = (s) => ({ sessionId: s.id, ticks: fixture.ticks, jumps: fixture.jumps, resizes: fixture.resizes, score: 999999999 });
 let turnstileGood = true;
@@ -379,10 +379,11 @@ test("a historical completed code remains terminal without inventing a manual di
   env.DB.sqlite.close();
   env.DB = new D1({before:"0003"});
   env.DB.sqlite.prepare("INSERT INTO employees(sub,email,name,role) VALUES('alice','alice@example.com','Alice Historique','staff')").run();
-  const run = await ownedGame(env);
+  const run={id:secureId(),owner_hash:await privateHmac(env,'owner',rawOwner)};
   const phoneHash = await privateHmac(env, "phone", "+15145551234");
-  env.DB.sqlite.prepare("UPDATE sessions SET state='eligible',score=10000,claim_deadline=?,bound_phone_hash=?,first_name='Camille',last_name='Historique' WHERE id=?").run(now+600000, phoneHash, run.id);
-  const {reward} = await award(env.DB, {sessionId:run.id,ownerHash:run.owner_hash,phoneHash,now});
+  env.DB.sqlite.prepare("INSERT INTO budgets(month) VALUES('2026-11')").run();env.DB.sqlite.prepare("INSERT INTO sms_daily(day) VALUES('2026-11-14')").run();
+  env.DB.sqlite.prepare("INSERT INTO sessions(id,owner_hash,seed,width,height,mode,engine_version,month,cap_cents,created_at,expires_at,state,reservation_active,score,claim_deadline,bound_phone_hash,first_name,last_name,sms_day,sms_reserved) VALUES(?,?,1,390,844,'rewards','legacy','2026-11',2000,?,?,'eligible',1,10000,?,?,'Camille','Historique','2026-11-14',1)").run(run.id,run.owner_hash,now-1000,now+600000,now+600000,phoneHash);
+  const reward={id:secureId()};env.DB.sqlite.prepare("INSERT INTO rewards(id,session_id,phone_hash,code,value_cents,month,first_name,last_name,score,confirmed_at,claim_by,last_actor_sub,last_actor_name) VALUES(?,?,?,'LEGACY-CODE',2000,'2026-11','Camille','Historique',10000,?,?,?,'Joueur')").run(reward.id,run.id,phoneHash,now,now+2592000000,run.owner_hash);
   env.DB.sqlite.prepare("UPDATE rewards SET status='claimed',claimed_by='alice',claimed_by_name='Alice Historique',claimed_at=?,last_actor_sub='alice',last_actor_name='Alice Historique' WHERE id=?").run(now, reward.id);
   env.DB.sqlite.prepare("UPDATE rewards SET status='issued',issued_by='alice',issued_by_name='Alice Historique',issued_at=?,lightspeed_ref='HISTORIQUE-CONSERVE',last_actor_sub='alice',last_actor_name='Alice Historique' WHERE id=?").run(now, reward.id);
   const old = env.DB.sqlite.prepare("SELECT * FROM rewards WHERE id=?").get(reward.id);
@@ -428,7 +429,7 @@ test("cancellation never refunds budget or resets the rolling 30-day phone rule;
   const second = await ownedGame(env);
   await api(env, "/api/games/finish", replay(second));
   env.DB.sqlite.prepare("UPDATE sessions SET bound_phone_hash=?,first_name='Alice',last_name='Noël' WHERE id=?").run(phoneHash, second.id);
-  assert.equal((await award(env.DB, { sessionId: second.id, ownerHash, phoneHash, now })).reason, "phone_cooldown");
+  assert.ok(["phone_cooldown","device_cooldown"].includes((await award(env.DB, { sessionId: second.id, ownerHash, phoneHash, now })).reason));
   now++;
   const secondAward = await award(env.DB, { sessionId: second.id, ownerHash, phoneHash, now });
   assert.equal(secondAward.reward.value_cents, 2000);
@@ -485,7 +486,7 @@ test("admin shows current Toronto month money and real cross-month code counts a
   let phoneSequence = 0;
   async function confirm(at, status = "pending") {
     now = Date.parse(at);
-    const run = await ownedGame(env);
+    const run = await ownedGame(env,{owner:secureId(32)});
     const phoneHash = await privateHmac(env, "phone", `+1514555${String(++phoneSequence).padStart(4, "0")}`);
     env.DB.sqlite.prepare("UPDATE sessions SET state='eligible',score=10000,claim_deadline=?,bound_phone_hash=?,first_name='Camille',last_name=? WHERE id=?").run(now+600000, phoneHash, `Gagnant ${phoneSequence}`, run.id);
     const { reward } = await award(env.DB, {sessionId:run.id,ownerHash:run.owner_hash,phoneHash,now});
@@ -563,4 +564,49 @@ test("Preview consumption records no POS discount and is forbidden on production
   env.PREVIEW_TEST_REDEMPTION='true';env.DEPLOYMENT_ENVIRONMENT='preview';env.APP_ORIGIN='https://minijeux-4gy.pages.dev';assert.equal((await api(env,endpoint+'/use',{previewTestConsumed:true},headers)).status,403);
   env.APP_ORIGIN='https://develop-noel-budget-configur.minijeux-4gy.pages.dev';const result=await api(env,endpoint+'/use',{previewTestConsumed:true},headers);assert.equal(result.status,200);const used=(await result.json()).reward;assert.equal(used.discountApplied,false);assert.equal(used.previewTestConsumed,true);assert.equal(used.appliedValueCents,null);
   assert.equal((await api(env,endpoint+'/use',{previewTestConsumed:true},headers)).status,200);const audit=env.DB.sqlite.prepare("SELECT details FROM audit WHERE action='preview_test_used'").all();assert.equal(audit.length,1);assert.equal(JSON.parse(audit[0].details).appliedValueCents,0);
+});
+
+function launchEnvironment(){const env=environment();delete env.PHONE_VERIFICATION_MODE;env.SMS_APPROVED='false';env.SMS_DAILY_LIMIT='0';env.NOTIFICATION_SMS_ENABLED='false';for(const key of ['TWILIO_ACCOUNT_SID','TWILIO_AUTH_TOKEN','TWILIO_VERIFY_SERVICE_SID','TWILIO_MESSAGING_SERVICE_SID'])delete env[key];return env;}
+async function launchWin(env,{owner=rawOwner,phone='+15145551234',firstName='Camille',lastName='Noël'}={}){
+  const run=await ownedGame(env,{owner}),headers={Cookie:'__Host-rewards-owner='+owner};
+  const finished=await api(env,'/api/games/finish',replay(run),headers);assert.equal(finished.status,200);
+  const body={sessionId:run.id,phone,firstName,lastName,consentVersion:POLICY_VERSION};
+  return {run,headers,body,response:await api(env,'/api/rewards/claim',body,headers)};
+}
+test('launch without any Twilio settings awards after real replay and stores a protected searchable phone only for staff',async()=>{
+  const env=launchEnvironment();assert.equal((await(await api(env,'/api/rewards/status')).json()).mode,'rewards');
+  const w=await launchWin(env);assert.equal(w.response.status,200);const reward=(await w.response.json()).reward;assert.match(reward.code,/^GOAT-[A-F0-9]{32}$/);assert.equal(reward.phoneVerified,false);
+  for(const field of ['phone','phoneCiphertext','phone_ciphertext','device_hash','phoneLast4'])assert.equal(Object.hasOwn(reward,field),false);
+  const stored=env.DB.sqlite.prepare('SELECT * FROM rewards').get();assert.ok(stored.phone_ciphertext.startsWith('v1.'));assert.ok(!JSON.stringify(stored).includes('+15145551234'));assert.equal(stored.name_search,'camille noel');
+  assert.equal(sent,0);assert.equal(checks,0);assert.equal(env.DB.sqlite.prepare('SELECT COUNT(*) n FROM sms_daily').get().n,0);
+  env.DB.sqlite.prepare("INSERT INTO employees VALUES('alice','alice@example.com','Alice','staff',1)").run();const auth={'Cf-Access-Jwt-Assertion':await jwt()};
+  for(const term of ['NOEL','+1 (514) 555-1234',reward.code]){const result=await(await api(env,'/api/admin/rewards?search='+encodeURIComponent(term),undefined,auth)).json();assert.equal(result.rewards.length,1);assert.equal(result.rewards[0].phone,'+15145551234');}
+  assert.equal((await api(env,'/api/admin/rewards?search=Camille')).status,401);
+  const repeat=await api(env,'/api/rewards/claim',w.body,w.headers);assert.equal((await repeat.json()).reward.code,reward.code);assert.match(repeat.headers.get('Set-Cookie'),/HttpOnly/);
+  assert.equal((await api(env,'/api/rewards/claim',{...w.body,phone:'+15145551235'},w.headers)).status,409);
+});
+test('same phone with a different name on another device is denied, dated and signalled without a second code',async()=>{
+  const env=launchEnvironment(),first=await launchWin(env);const reward=(await first.response.json()).reward;
+  const second=await launchWin(env,{owner:secureId(32),firstName:'Autre',lastName:'Personne'});assert.equal(second.response.status,409);const denial=await second.response.json();assert.equal(denial.error,'phone_cooldown');assert.equal(denial.nextEligibleAt,new Date(Date.parse(reward.confirmedAt)+2592000000).toISOString());
+  const audit=env.DB.sqlite.prepare("SELECT details FROM audit WHERE action='duplicate_detected'").get();assert.equal(JSON.parse(audit.details).differentName,true);assert.equal(env.DB.sqlite.prepare('SELECT COUNT(*) n FROM rewards').get().n,1);
+});
+test('same browser with another phone is denied while play remains unlimited and consumes no new budget',async()=>{
+  const env=launchEnvironment(),first=await launchWin(env);const reward=(await first.response.json()).reward;
+  const before=env.DB.sqlite.prepare('SELECT used_cents,reserved_cents FROM budgets').get();
+  for(let index=0;index<20;index++){const response=await api(env,'/api/games/start',{width:390,height:844,expectedMode:'rewards'});assert.equal(response.status,200);const value=await response.json();assert.equal(value.playOnly,true);assert.equal(value.rewardRestriction.reason,'device_cooldown');assert.equal(value.rewardRestriction.nextEligibleAt,new Date(Date.parse(reward.confirmedAt)+2592000000).toISOString());}
+  assert.deepEqual(env.DB.sqlite.prepare('SELECT used_cents,reserved_cents FROM budgets').get(),before);
+  const second=await launchWin(env,{phone:'+15145551235'});assert.equal(second.response.status,409);assert.equal((await second.response.json()).error,'device_cooldown');assert.equal(env.DB.sqlite.prepare('SELECT COUNT(*) n FROM rewards').get().n,1);
+});
+test('only an active manager can grant a justified one-use phone/device exception and previous rewards remain intact',async()=>{
+  const env=launchEnvironment(),first=await launchWin(env);const reward=(await first.response.json()).reward;
+  env.DB.sqlite.prepare("INSERT INTO employees VALUES('alice','alice@example.com','Alice','staff',1)").run();const auth={'Cf-Access-Jwt-Assertion':await jwt()},path='/api/admin/rewards/'+reward.id;
+  const body={scope:'both',reason:'Appareil partagé, exception du gestionnaire',requestId:secureId()};
+  assert.equal((await api(env,path+'/unlock',body,auth)).status,403);env.DB.sqlite.prepare("UPDATE employees SET role='manager'").run();
+  assert.equal((await api(env,path+'/unlock',{...body,reason:''},auth)).status,400);
+  assert.equal((await api(env,path+'/unlock',body,auth)).status,200);assert.equal((await api(env,path+'/unlock',body,auth)).status,200);assert.equal(env.DB.sqlite.prepare('SELECT COUNT(*) n FROM reward_exceptions').get().n,2);
+  const allowed=await launchWin(env);assert.equal(allowed.response.status,200);const next=(await allowed.response.json()).reward;assert.notEqual(next.code,reward.code);
+  assert.equal(env.DB.sqlite.prepare('SELECT COUNT(*) n FROM reward_exceptions WHERE used_reward_id=?').get(next.id).n,2);assert.equal(env.DB.sqlite.prepare('SELECT used_cents FROM budgets').get().used_cents,4000);
+  const blocked=await api(env,'/api/games/start',{width:390,height:844,expectedMode:'rewards'});assert.equal((await blocked.json()).playOnly,true);
+  const info=await(await api(env,path+'/eligibility',undefined,auth)).json();assert.equal(info.history.length,2);assert.equal(info.potentialDuplicate,true);assert.ok(info.phone.nextEligibleAt);
+  assert.equal(env.DB.sqlite.prepare("SELECT COUNT(*) n FROM audit WHERE action='manager_exception_granted'").get().n,2);assert.equal(env.DB.sqlite.prepare("SELECT COUNT(*) n FROM audit WHERE action='manager_exception_consumed'").get().n,2);
 });

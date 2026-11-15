@@ -1,3 +1,5 @@
+**Version actuelle : lancement sans SMS, jeu illimité, contrôles téléphone/navigateur et accès du personnel par courriel. Voir [la procédure actuelle](LANCEMENT-SANS-SMS.md). Les descriptions SMS ci-dessous concernent désormais le mode optionnel futur.**
+
 # Livraison de développement — 15 novembre 2026
 
 Branche : `develop/noel-budget-configurable`. Production `livraison-v3` inchangée ; aucune migration distante ni activation de gains.

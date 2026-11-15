@@ -1,4 +1,5 @@
 import { ApiError, monthWindow, rewardView, secureId, string } from './common.mjs';
+import { customerColumns,adminCustomerView } from './customer.mjs';
 import { normalizePhone, privateHmac } from './sms.mjs';
 import { cleanup, stmt } from './store.mjs';
 import { getBudget } from './budget.mjs';
@@ -63,7 +64,7 @@ export async function createManual(env,employee,body,now=Date.now()) {
     return row;
   };
   const existing=await prior();
-  if(existing) return {reward:rewardView(existing,now),repeated:true};
+  if(existing) return {reward:await adminCustomerView(env,existing,now),repeated:true};
   if(q.month!==monthWindow(now).month) throw new ApiError(409,'quote_stale','Le mois a changé. Recalculez la proposition.');
   const overrun=Math.max(0,q.usedCents+q.reservedCents+body.valueCents-q.budgetCents);
   const exceptional=overrun-Math.max(0,q.usedCents+q.reservedCents-q.budgetCents);
@@ -72,19 +73,20 @@ export async function createManual(env,employee,body,now=Date.now()) {
   if(q.lastRewardId && !body.authorizeCooldown) throw new ApiError(400,'cooldown_override_required');
   if(!q.lastRewardId && body.authorizeCooldown) throw new ApiError(400,'unnecessary_cooldown_override');
   const id=secureId(),code='GOAT-'+Array.from(crypto.getRandomValues(new Uint8Array(16)),b=>b.toString(16).padStart(2,'0')).join('').toUpperCase();
+  const customer=await customerColumns(env,{phone,firstName,lastName,rewardId:id});
   let result;
   try {
     result=await env.DB.batch([
       stmt(env.DB,'INSERT INTO budgets(month,limit_cents) SELECT ?,default_monthly_limit_cents FROM reward_budget_settings WHERE id=1 ON CONFLICT(month) DO NOTHING',q.month),
-      stmt(env.DB,`INSERT INTO rewards(id,session_id,phone_hash,code,value_cents,month,first_name,last_name,score,confirmed_at,claim_by,last_actor_sub,last_actor_name,source,manual_reason,manual_request_id,manual_fingerprint,budget_override,budget_override_reason,exceptional_cents,cooldown_override,cooldown_override_reason)
-        SELECT ?,NULL,?,?,?,b.month,?,?,NULL,?,?,e.sub,e.name,'manual',?,?,?,?,?,?,?,?
+      stmt(env.DB,`INSERT INTO rewards(id,session_id,phone_hash,code,value_cents,month,first_name,last_name,score,confirmed_at,claim_by,last_actor_sub,last_actor_name,source,manual_reason,manual_request_id,manual_fingerprint,budget_override,budget_override_reason,exceptional_cents,cooldown_override,cooldown_override_reason,phone_ciphertext,phone_last4,name_search,phone_verified)
+        SELECT ?,NULL,?,?,?,b.month,?,?,NULL,?,?,e.sub,e.name,'manual',?,?,?,?,?,?,?,?,?,?,?,0
         FROM budgets b JOIN employees e ON e.sub=? WHERE e.active=1 AND e.role='manager' AND b.month=? AND b.limit_cents=? AND b.used_cents=? AND b.reserved_cents=? AND b.revision=?
         AND COALESCE((SELECT id FROM rewards WHERE phone_hash=? AND confirmed_at>? ORDER BY confirmed_at DESC,id DESC LIMIT 1),'')=? RETURNING *`,
-        id,phoneHash,code,body.valueCents,firstName,lastName,now,now+DAYS30,manualReason,body.requestId,hash,body.authorizeBudgetOverrun?1:0,budgetReason,exceptional,body.authorizeCooldown?1:0,cooldownReason,actor.sub,q.month,q.budgetCents,q.usedCents,q.reservedCents,q.revision,phoneHash,now-DAYS30,q.lastRewardId??'')
+        id,phoneHash,code,body.valueCents,firstName,lastName,now,now+DAYS30,manualReason,body.requestId,hash,body.authorizeBudgetOverrun?1:0,budgetReason,exceptional,body.authorizeCooldown?1:0,cooldownReason,customer.phoneCiphertext,customer.phoneLast4,customer.nameSearch,actor.sub,q.month,q.budgetCents,q.usedCents,q.reservedCents,q.revision,phoneHash,now-DAYS30,q.lastRewardId??'')
     ]);
-  } catch(error) {const completed=await prior();if(completed)return{reward:rewardView(completed,now),repeated:true};throw error;}
+  } catch(error) {const completed=await prior();if(completed)return{reward:await adminCustomerView(env,completed,now),repeated:true};throw error;}
   const row=result[1].results?.[0];
-  if(!row){const completed=await prior();if(completed)return{reward:rewardView(completed,now),repeated:true};}
+  if(!row){const completed=await prior();if(completed)return{reward:await adminCustomerView(env,completed,now),repeated:true};}
   if(!row) throw new ApiError(409,'quote_stale','Le budget ou les gains de ce client ont changé. Recalculez puis confirmez la nouvelle proposition.');
-  return {reward:rewardView(row,now),repeated:false};
+  return {reward:await adminCustomerView(env,row,now),repeated:false};
 }

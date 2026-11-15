@@ -27,9 +27,9 @@
     <section id="access-panel" class="access-panel" aria-live="polite">
       <span class="eyebrow">Espace employés</span>
       <h1 id="access-title">Vérification de votre accès…</h1>
-      <p id="access-message">Veuillez patienter pendant la connexion à votre compte individuel.</p>
+      <p id="access-message">Une connexion au début du service suffit pour vérifier plusieurs codes. Aucun compte Cloudflare n’est nécessaire.</p>
       <p id="access-identity" hidden></p>
-      <a id="access-login" class="button primary" href="/admin/" hidden>Se connecter avec mon compte</a>
+      <a id="access-login" class="button primary" href="/admin/" hidden>Se connecter avec mon courriel</a>
       <button id="access-retry" class="button secondary" type="button" hidden>Réessayer</button>
     </section>
 
@@ -38,7 +38,7 @@
         <div>
           <span class="eyebrow">Espace employés · Campagne de Noël</span>
           <h1>Récompenses clients</h1>
-          <p>Recherchez le code du client pour appliquer son rabais sur la facture.</p><p class="inline-error"><strong>Rabais applicable uniquement aux aliments. Ne pas réduire le prix des boissons alcooliques.</strong> Facture mixte : portion alimentaire seulement. Montant limité aux aliments admissibles ; reliquat perdu, sans échange contre de l’argent.</p>
+          <p>Recherchez un client par nom, téléphone ou code pour consulter ses récompenses.</p><p class="inline-error"><strong>Rabais applicable uniquement aux aliments. Ne pas réduire le prix des boissons alcooliques.</strong> Facture mixte : portion alimentaire seulement. Montant limité aux aliments admissibles ; reliquat perdu, sans échange contre de l’argent.</p>
         </div>
         <a class="procedure-link" href="#procedure">Consulter la procédure <span aria-hidden="true">↓</span></a>
       </section>
@@ -82,7 +82,7 @@
         <div class="rewards-panel surface">
           <div class="section-heading"><div><span class="eyebrow">Registre</span><h2 id="registry-title">Derniers gagnants</h2></div><button id="export-button" class="button text-button" type="button">Exporter CSV <span aria-hidden="true">↓</span></button></div>
           <form id="search-form" class="search-form" role="search">
-            <div class="field search-field"><label for="code-search">Rechercher un code</label><div class="search-controls"><input id="code-search" type="search" name="code" maxlength="80" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="Saisir le code du client"><button class="button primary" type="submit">Rechercher</button></div></div>
+            <div class="field search-field"><label for="code-search">Nom, téléphone ou code</label><div class="search-controls"><input id="code-search" type="search" name="search" maxlength="160" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Nom, téléphone ou code"><button class="button primary" type="submit">Rechercher</button></div></div>
             <div class="field status-field"><label for="status-filter">Statut</label><select id="status-filter" name="status"><option value="">Tous les statuts</option><option value="pending">À utiliser</option><option value="claimed">Pris en charge</option><option value="issued">Déjà utilisé</option><option value="expired">Code expiré</option><option value="cancelled">Annulé</option></select></div>
           </form>
           <div class="list-meta"><p id="result-count" role="status">Chargement des récompenses…</p><button id="refresh-button" class="refresh-button" type="button">Actualiser <span aria-hidden="true">↻</span></button></div>
@@ -93,13 +93,14 @@
         </div>
 
         <aside id="detail-panel" class="detail-panel surface" aria-label="Détail de la récompense">
-          <div id="detail-empty" class="detail-empty"><span class="detail-icon" aria-hidden="true">↖</span><span class="eyebrow">Vérification d’un code</span><h2>Entrez le code du client</h2><p>Sa fiche s’affichera après la recherche. Vous pouvez aussi choisir un gagnant dans la liste.</p></div>
+          <div id="detail-empty" class="detail-empty"><span class="detail-icon" aria-hidden="true">↖</span><span class="eyebrow">Vérification d’un code</span><h2>Recherchez un client</h2><p>Ses récompenses s’afficheront après la recherche. Choisissez une ligne pour ouvrir sa fiche.</p></div>
           <div id="detail-content" hidden>
             <div class="section-heading detail-heading"><span class="eyebrow">Fiche récompense</span><button id="close-detail" class="close-button" type="button" aria-label="Fermer la fiche">×</button></div>
             <div class="detail-title"><span id="detail-status" class="status-badge"></span><h2 id="detail-name"></h2><p id="detail-code" class="reward-code"></p><strong id="detail-value" class="reward-value"></strong></div>
             <p id="detail-validation" class="code-validation" role="status" hidden></p>
             <dl id="detail-facts" class="detail-facts"></dl>
             <div id="detail-action"></div>
+            <section id="eligibility-section" class="audit-section" aria-label="Admissibilité et doublons"></section>
             <section class="audit-section" aria-label="Historique"><h3>Historique</h3><p id="audit-state" class="muted">Chargement de l’historique…</p><ol id="audit-list" class="audit-list"></ol></section>
           </div>
         </aside>

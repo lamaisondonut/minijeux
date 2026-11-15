@@ -69,8 +69,11 @@ async function fixture() {
     await run(`INSERT INTO sessions(id,owner_hash,seed,width,height,mode,engine_version,month,cap_cents,created_at,expires_at,reservation_active,score,claim_deadline,bound_phone_hash,first_name,last_name,sms_day,sms_reserved,state)
       VALUES(?,?,1,360,640,'rewards','test',?,2000,${BASE_NOW},${BASE_NOW + 100000},1,10000,${BASE_NOW + 100000},?,'Jane','Doe','2026-11-15',1,'eligible')`, sid, 'owner-' + sid, month, phone);
   };
-  const award = (sid, month, phone) => run(`INSERT INTO rewards(id,session_id,phone_hash,code,value_cents,month,first_name,last_name,score,confirmed_at,claim_by,last_actor_sub,last_actor_name)
-    VALUES(?,?,?,?,2000,?,'Jane','Doe',10000,${BASE_NOW + 1000},${BASE_NOW + 1000 + 2592000000},'test','Tester')`, 'r-' + sid, sid, phone, 'code-' + sid, month);
+  const award = async (sid, month, phone) => {
+    const modern=(await all('PRAGMA table_info(rewards)')).some(c=>c.name==='device_hash');
+    return run(`INSERT INTO rewards(id,session_id,phone_hash,code,value_cents,month,first_name,last_name,score,confirmed_at,claim_by,last_actor_sub,last_actor_name${modern?',device_hash':''})
+      VALUES(?,?,?,?,2000,?,'Jane','Doe',10000,${BASE_NOW+1000},${BASE_NOW+1000+2592000000},'test','Tester'${modern?',?':''})`, 'r-'+sid,sid,phone,'code-'+sid,month,...modern?['owner-'+sid]:[]);
+  };
   await seed('past', '2026-10', 'past-phone');
   await award('past', '2026-10', 'past-phone');
   await seed('active', '2026-11', 'active-phone');
@@ -240,7 +243,7 @@ test('configurable budgets preserve data and enforce scopes in real local D1', a
       await assert.rejects(changeBudget(f.db, employee, { ...body, budgetCents: 30000 }, BASE_NOW + 3000), error => error.status === 409 && error.code === 'budget_request_conflict');
       assert.equal((await f.all("SELECT * FROM audit WHERE action='budget_changed'")).length, 5);
     });
-    await t.test('new empty Preview bootstrap matches final 0001–0007 schema without destructive statements', async () => {
+    await t.test('new empty Preview bootstrap matches final 0001–0009 schema without destructive statements', async () => {
       const previewSql = readFileSync(new URL('../proposals/sql/preview_schema_development.sql', import.meta.url), 'utf8');
       const bootstrap = statements(previewSql);
       assert.equal(bootstrap.some(sql => /^\s*(?:DROP|ALTER|DELETE|UPDATE)\b/i.test(sql.replace(/--[^\n]*/g, ''))), false);
@@ -252,7 +255,7 @@ test('configurable budgets preserve data and enforce scopes in real local D1', a
       assert.equal((await f.emptyDb.prepare('PRAGMA foreign_keys').first()).foreign_keys, 1);
       for (const table of originalTables) assert.equal((await f.emptyDb.prepare(`SELECT COUNT(*) AS count FROM ${table}`).first()).count, 0, table);
       assert.deepEqual(await f.emptyDb.prepare('SELECT * FROM reward_budget_settings').first(), { id: 1, default_monthly_limit_cents: 10000, revision: 0, updated_at: 0, updated_by: null });
-      assert.equal((await f.emptyDb.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE type='trigger'").first()).count, 14);
+      assert.equal((await f.emptyDb.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE type='trigger'").first()).count, 24);
     });
   } finally { await f.close(); }
 });

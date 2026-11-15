@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { verifyAccessIdentity, requireAdmin } from '../server/auth.mjs';
+import { openReviewDatabase } from './helpers/review-d1.mjs';
+import { migrateSqlite } from './helpers/migrations.cjs';
 
 const encoder = new TextEncoder();
 const keyPair = await crypto.subtle.generateKey({ name: 'RSASSA-PKCS1-v1_5', modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' }, true, ['sign', 'verify']);
@@ -57,4 +59,17 @@ test('active staff allowlist binds JWT subject and email and returns the human e
     await assert.rejects(requireAdmin(tokenRequest, { ...env, DB }, options), { status: 403 });
     row = original;
   }
+});
+
+test('pre-approved email binds on first verified login and the same session checks many codes without new enrollment',async()=>{
+  const f=openReviewDatabase(':memory:');migrateSqlite(f.sqlite);
+  try{
+    f.sqlite.prepare("INSERT INTO employees VALUES('invite:employee@example.com','employee@example.com','Louise','staff',1)").run();
+    const req=request(await jwt());
+    for(let i=0;i<10;i++)assert.equal((await requireAdmin(req,{...env,DB:f.DB},options)).name,'Louise');
+    assert.equal(f.sqlite.prepare("SELECT COUNT(*) n FROM audit WHERE action='employee_first_login'").get().n,1);
+    assert.equal(f.sqlite.prepare('SELECT sub FROM employees').get().sub,claims.sub);
+    f.sqlite.prepare('UPDATE employees SET active=0').run();await assert.rejects(requireAdmin(req,{...env,DB:f.DB},options),{status:403});
+    await assert.rejects(requireAdmin(request(await jwt({...claims,sub:'unknown',email:'unknown@example.com'})),{...env,DB:f.DB},options),{status:403});
+  }finally{f.sqlite.close();}
 });

@@ -9,7 +9,7 @@ const now=Date.parse('2026-11-15T17:00:00Z'),phone='+15145551234';
 async function fixture(t) {
   const f=openReviewDatabase(':memory:');migrateSqlite(f.sqlite);t.after(()=>f.sqlite.close());
   f.sqlite.prepare("INSERT INTO employees VALUES('manager','m@example.com','Manon','manager',1)").run();
-  const env={DB:f.DB,MANUAL_REWARDS_ENABLED:'true',NOTIFICATION_SMS_ENABLED:'true',TERMS_APPROVED:'true',SMS_APPROVED:'true',NOTIFICATION_SMS_DAILY_LIMIT:'10',REWARDS_HMAC_SECRET:'x'.repeat(40),TWILIO_ACCOUNT_SID:'AC'+'1'.repeat(32),TWILIO_AUTH_TOKEN:'x'.repeat(32),TWILIO_MESSAGING_SERVICE_SID:'MG'+'2'.repeat(32)},employee={sub:'manager',role:'manager'};
+  const env={DB:f.DB,PHONE_VERIFICATION_MODE:'sms',MANUAL_REWARDS_ENABLED:'true',NOTIFICATION_SMS_ENABLED:'true',TERMS_APPROVED:'true',SMS_APPROVED:'true',NOTIFICATION_SMS_DAILY_LIMIT:'10',REWARDS_HMAC_SECRET:'x'.repeat(40),TWILIO_ACCOUNT_SID:'AC'+'1'.repeat(32),TWILIO_AUTH_TOKEN:'x'.repeat(32),TWILIO_MESSAGING_SERVICE_SID:'MG'+'2'.repeat(32)},employee={sub:'manager',role:'manager'};
   const quote=await quoteManual(env,employee,{phone,valueCents:2000},now);
   const r=await createManual(env,employee,{phone,valueCents:2000,firstName:'Camille',lastName:'Essai',reason:'Geste commercial',requestId:secureId(),quote:quote.quote,authorizeBudgetOverrun:false,authorizeCooldown:false},now);
   const reward=f.sqlite.prepare('SELECT * FROM rewards WHERE id=?').get(r.reward.id);

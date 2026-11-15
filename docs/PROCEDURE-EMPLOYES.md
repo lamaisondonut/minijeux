@@ -1,3 +1,11 @@
+# Accès quotidien du personnel
+
+Ouvrir [l’administration du restaurant](https://develop-noel-budget-configur.minijeux-4gy.pages.dev/admin/). Aucun compte Cloudflare n’est nécessaire. Se connecter avec son courriel autorisé et le code reçu par courriel au début du service. La session de 24 heures, configurée par l’hébergeur, permet de vérifier plusieurs bons sans reconnexion à chaque code. Ne pas partager les comptes ; se déconnecter en quittant un appareil partagé.
+
+Le jeu ne demande aucun SMS. Rechercher le client par nom, téléphone ou code. Le téléphone déclaré n’est pas vérifié. La fiche affiche les gains précédents, les dates d’admissibilité et les doublons potentiels. Un gestionnaire peut justifier un déblocage exceptionnel du téléphone ou de l’appareil pour un seul nouveau gain dans les 24 heures, sans effacer les anciens gains ni modifier le budget. Un joueur déjà récompensé peut continuer à jouer.
+
+La procédure de rabais alimentaire ci-dessous reste applicable. En Preview d’essai, utiliser la confirmation sans rabais prévue à cet effet ; ne jamais déclarer qu’un rabais a été appliqué si ce n’est pas le cas.
+
 # Appliquer un bon de rabais — Les Boréalistes
 
 La promotion reste fermée avant validation réglementaire et configuration. Cette procédure concerne les comptes individuels autorisés dans `/admin/`, sur téléphone, tablette ou ordinateur.

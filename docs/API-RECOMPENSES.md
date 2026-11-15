@@ -1,3 +1,5 @@
+**Version actuelle : lancement sans SMS, jeu illimité, contrôles téléphone/navigateur et accès du personnel par courriel. Voir [la procédure actuelle](LANCEMENT-SANS-SMS.md). Les descriptions SMS ci-dessous concernent désormais le mode optionnel futur.**
+
 # API Récompenses
 
 Le backend est fourni dans `functions/`, `server/` et `migrations/0001_rewards.sql` à `0007_preview_test_consumption.sql`, puis compilé dans le fichier publié `v3/_worker.js`. Aucun service payant ni déploiement de production n’est activé par le dépôt. La migration doit être appliquée à une D1 dédiée avant activation; aucune liaison D1 distante n'a été vérifiée dans cet environnement. Le moteur partagé `v3/game-session-engine.mjs` détermine tous les scores depuis la graine, les sauts et les redimensionnements; aucun score envoyé par le navigateur n’est accepté comme preuve. Voir le [guide d'activation](ACTIVATION-RECOMPENSES.md) pour l'ordre des opérations, les adresses et les accès manquants.

@@ -12,13 +12,14 @@
   }],
   "vars": {
     "DEPLOYMENT_ENVIRONMENT": "preview",
-    "PREVIEW_TEST_REDEMPTION": "false",
-    "REWARDS_ENABLED": "false",
-    "MANUAL_REWARDS_ENABLED": "false",
+    "PREVIEW_TEST_REDEMPTION": "true",
+    "PHONE_VERIFICATION_MODE": "unverified",
+    "REWARDS_ENABLED": "true",
+    "MANUAL_REWARDS_ENABLED": "true",
     "NOTIFICATION_SMS_ENABLED": "false",
     "NOTIFICATION_SMS_DAILY_LIMIT": "10",
     "SMS_APPROVED": "false",
-    "TERMS_APPROVED": "false",
+    "TERMS_APPROVED": "true",
     "SMS_PROVIDER": "twilio",
     "SMS_DAILY_LIMIT": "0",
     "APP_ORIGIN": "https://develop-noel-budget-configur.minijeux-4gy.pages.dev"

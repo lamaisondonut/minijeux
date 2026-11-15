@@ -1,3 +1,5 @@
+**Version actuelle : lancement sans SMS, jeu illimité, contrôles téléphone/navigateur et accès du personnel par courriel. Voir [la procédure actuelle](LANCEMENT-SANS-SMS.md). Les descriptions SMS ci-dessous concernent désormais le mode optionnel futur.**
+
 # Vérifications de la version récompenses
 
 Réalisées localement le 15 novembre 2026, Node.js 24, Python 3, Chromium et Wrangler 4.162.0. Aucun SMS réel ni écriture de production.
@@ -43,3 +45,9 @@ Les scénarios manuels vérifient la désactivation par défaut, l’accès refu
 Le Worker compilé est également testé avec sa vraie liaison D1 locale pour les émissions manuelles simultanées et justifiées, la notification initiale, le renvoi du même code et une utilisation alimentaire partielle. Les services externes restent simulés dans ces essais. Les vérifications GitHub de ce nouveau commit doivent être consultées séparément ; des succès antérieurs ne prouvent pas les modifications présentes.
 
 Les tests de correction couvrent le numéro invalide, le SMS non reçu, le délai, le renvoi, le maintien de la réservation et du score, le refus de l’ancienne vérification, la course avec une validation en cours, les cinq demandes et le blocage après confirmation. Le parcours de consommation sans rabais est refusé sur l’hôte Production et journalisé avec 0 $ réellement appliqué en Preview.
+
+## Règles finales sans SMS — validation du 15 novembre 2026
+
+26 scénarios API, 15 scénarios de concurrence SQLite avec connexions indépendantes, 128 contrôles du client et 20 scénarios du tableau de bord dans Chromium. Le cas de connexion par courriel préautorisé est testé avec une session réutilisée puis un compte révoqué. Les tests de confidentialité vérifient le chiffrement, la liaison au bon et la projection publique sans téléphone. Les migrations 0001–0009 sont appliquées dans une vraie D1 locale ; reconstruction/rollback et schéma vide sont vérifiés. Le Worker compilé sans configuration Twilio revalide un vrai score 10 526, attribue un seul bon, conserve le numéro chiffré et le retrouve uniquement dans la recherche privée.
+
+Les tests couvrent le téléphone avec un autre nom, le même navigateur avec un autre téléphone, la poursuite illimitée du jeu, la date de prochaine admissibilité et le déblocage du gestionnaire consommé une seule fois. Les données D1 distantes et les comptes du restaurant restent à vérifier sur la configuration de l’hébergeur. Aucun SMS ni modification de production n’a été effectué.

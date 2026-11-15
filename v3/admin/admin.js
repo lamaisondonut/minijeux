@@ -102,7 +102,7 @@
     $('access-retry').hidden = status === 401;
     if (status === 401) {
       $('access-title').textContent = 'Connectez-vous à votre compte';
-      $('access-message').textContent = 'Votre session est absente ou a expiré. Connectez-vous avec votre compte individuel.';
+      $('access-message').textContent = 'Connectez-vous avec votre courriel autorisé et le code reçu par courriel. La session reste ouverte pendant le service ; aucune reconnexion à chaque code. Aucun compte Cloudflare n’est nécessaire.';
     } else if (status === 403) {
       $('access-title').textContent = 'Accès employé requis';
       $('access-message').textContent = 'Votre compte est connecté, mais il ne figure pas parmi les employés autorisés. Contactez votre responsable pour faire vérifier votre accès.';
@@ -131,7 +131,7 @@
       const data = await api('/me');
       if (session !== state.session) return;
       if (!data.employee || !(data.employee.sub || data.employee.subject)) throw new ApiError('Votre compte doit être vérifié par votre responsable.');
-      state.employee = data.employee;state.employee.previewTestRedemption=data.previewTestRedemption===true;
+      state.employee = data.employee;state.employee.previewTestRedemption=data.previewTestRedemption===true;state.employee.phoneVerificationMode=data.phoneVerificationMode==='sms'?'sms':'unverified';state.employee.notificationSmsEnabled=data.notificationSmsEnabled===true;
       $('employee-name').textContent = data.employee.name || data.employee.email || 'Compte employé';
       $('access-panel').hidden = true;
       $('admin-content').hidden = false;
@@ -283,10 +283,10 @@
     const request = ++state.listRequest;
     const session = state.session;
     const query = new URLSearchParams();
-    const code = $('code-search').value.trim().toUpperCase();
+    const search = $('code-search').value.trim();
     const status = $('status-filter').value;
-    if (code) query.set('code', code);
-    if (status && !code) query.set('status', status);
+    if (search) query.set('search', search);
+    if (status && !search) query.set('status', status);
     if (append && state.cursor) query.set('cursor', state.cursor);
     setListBusy(true);
     if (!append) {
@@ -302,7 +302,7 @@
       state.rewards = append ? [...state.rewards, ...data.rewards.filter((reward) => !state.rewards.some((item) => item.id === reward.id))] : data.rewards;
       state.cursor = data.nextCursor || null;
       renderRewards();
-      if (code && state.rewards.length === 1) {
+      if (search && state.rewards.length === 1) {
         selectReward(state.rewards[0]);
       } else if (state.selected) {
         const updated = state.rewards.find((reward) => reward.id === state.selected.id);
@@ -322,7 +322,7 @@
     clearNotice();
     renderRewards();
     renderDetail();
-    loadAudit();
+    loadAudit();loadEligibility();
     if (matchMedia('(max-width: 850px)').matches) $('detail-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
@@ -344,7 +344,7 @@
     $('list-state').hidden = state.rewards.length > 0;
     const searching = Boolean($('code-search').value.trim());
     $('registry-title').textContent = searching ? 'Résultat de la recherche' : $('status-filter').value ? 'Récompenses par statut' : 'Derniers gagnants';
-    if (!state.rewards.length) listState(searching ? 'CODE INTROUVABLE' : 'Aucune récompense trouvée', searching ? 'Vérifiez le code présenté par le client.' : 'Aucun gagnant à afficher pour le moment.');
+    if (!state.rewards.length) listState(searching ? 'AUCUN RÉSULTAT' : 'Aucune récompense trouvée', searching ? 'Vérifiez le nom, le téléphone ou le code saisi.' : 'Aucun gagnant à afficher pour le moment.');
     $('load-more').hidden = !state.cursor;
   }
 
@@ -367,6 +367,8 @@
     $('detail-validation').textContent = reward.status === 'claimed' ? 'CODE PRIS EN CHARGE' : reward.status === 'issued' ? 'CODE DÉJÀ UTILISÉ' : reward.status === 'expired' ? 'CODE EXPIRÉ' : '';
     $('detail-validation').hidden = !$('detail-validation').textContent;
     $('detail-facts').replaceChildren();
+    fact('Téléphone fourni', reward.phone || 'Non disponible pour cette ancienne récompense');
+    fact('Vérification du téléphone', reward.phoneVerified === true ? 'Vérifié par SMS' : 'Numéro déclaré, non vérifié par SMS');
     fact('Date d’attribution', date(reward.confirmedAt));
     fact('Origine',reward.source==='manual'?'Création manuelle par un gestionnaire':'Partie vérifiée');
     if (reward.appliedValueCents!=null){fact('Rabais réellement appliqué',amount(reward.appliedValueCents));fact('Portion inutilisée perdue',amount(reward.unusedCents));}
@@ -423,9 +425,33 @@
       block.append(node('h3', '', 'Vérification nécessaire'), node('p', '', 'Cette récompense nécessite une vérification. Actualisez le registre et contactez votre responsable.'));
     }
     container.append(block);
-    if(reward.status==='pending')container.append(notificationForm(reward));
+    if(reward.status==='pending' && state.employee?.notificationSmsEnabled===true)container.append(notificationForm(reward));
   }
 
+  async function loadEligibility() {
+    const reward=state.selected,session=state.session,section=$('eligibility-section');if(!reward||!section)return;
+    section.replaceChildren(node('h3','','Admissibilité et doublons'),node('p','','Vérification du registre…'));
+    try{
+      const data=await api('/rewards/'+encodeURIComponent(reward.id)+'/eligibility');if(session!==state.session||state.selected?.id!==reward.id)return;
+      section.replaceChildren(node('h3','','Admissibilité et doublons'));
+      if(data.potentialDuplicate)section.append(node('p','inline-error','Doublon potentiel : plusieurs gains ou une tentative répétée sont associés au téléphone ou à cet appareil. Vérifiez l’historique ; ce signal ne prouve pas une fraude.'));
+      for(const [key,label] of [['phone','Téléphone'],['device','Navigateur / appareil']]){const limit=data[key];if(!limit)continue;section.append(node('p','',label+' : '+(limit.exceptionAvailable?'déblocage autorisé jusqu’au '+date(limit.exceptionExpiresAt):limit.nextEligibleAt?'prochaine admissibilité '+date(limit.nextEligibleAt):'aucune restriction active')+(key==='device'&&!limit.tracked?' (aucun appareil lié à ce bon)':'')));}
+      for(const entry of data.history||[])section.append(node('p','',date(entry.confirmedAt)+' · '+entry.fullName+' · '+amount(entry.valueCents)+' · '+entry.code));
+      for(const signal of data.signals||[])section.append(node('p','',date(signal.createdAt)+' · tentative répétée'+(signal.differentName?' avec un nom différent':'')+' · '+(signal.reason==='device_cooldown'?'même appareil':'même téléphone')));
+      if(state.employee?.role==='manager'){
+        const form=node('form'),label=node('label','field','Déblocage exceptionnel pour un seul nouveau gain'),scope=node('select');scope.id='unlock-scope';
+        for(const [value,text] of [['phone','Téléphone'],['device','Appareil partagé'],['both','Téléphone et appareil']]){const option=node('option','',text);option.value=value;option.disabled=value!=='phone'&&!data.device?.tracked;scope.append(option);}label.append(scope);
+        const why=node('textarea');why.id='unlock-reason';why.required=true;why.minLength=8;why.maxLength=500;why.placeholder='Justification obligatoire (8 caractères minimum)';why.setAttribute('aria-label','Justification du déblocage');
+        const help=node('p','','Ce déblocage autorise un seul nouveau gain dans les prochaines 24 heures, sans modifier le budget ni effacer les gains précédents. Le joueur doit actualiser sa page après un déblocage d’appareil.');
+        const confirm=node('button','button secondary','Autoriser un gain exceptionnel');confirm.type='submit';confirm.id='unlock-confirm';const message=node('p');message.setAttribute('role','status');
+        form.append(label,why,help,message,confirm);section.append(form);const requestId=crypto.randomUUID().replaceAll('-','');let operation=null,busy=false;
+        form.addEventListener('submit',async event=>{event.preventDefault();if(busy||!form.reportValidity())return;operation ||= {scope:scope.value,reason:why.value,requestId};busy=true;for(const input of form.elements)input.disabled=true;
+          try{await api('/rewards/'+encodeURIComponent(reward.id)+'/unlock',{method:'POST',body:JSON.stringify(operation)});if(session!==state.session||state.selected?.id!==reward.id)return;showNotice('Déblocage exceptionnel enregistré pour un seul gain. Le budget reste inchangé.');await Promise.allSettled([loadEligibility(),loadAudit()]);}
+          catch(error){message.textContent=error.message;if(error.status>=400&&error.status<500){operation=null;for(const input of form.elements)input.disabled=false;}else{message.textContent+=' Réessayez la même demande.';confirm.disabled=false;confirm.textContent='Réessayer le même déblocage';}}finally{busy=false;}
+        });
+      }
+    }catch(error){if(session===state.session&&state.selected?.id===reward.id)section.replaceChildren(node('h3','','Admissibilité et doublons'),node('p','','Informations indisponibles. Actualisez la fiche.'));}
+  }
   async function loadAudit() {
     const reward = state.selected;
     if (!reward) return;
@@ -439,7 +465,7 @@
       if (request !== state.auditRequest || session !== state.session || !state.selected || reward.id !== state.selected.id) return;
       const events = data.events || data.audit;
       if (!Array.isArray(events)) throw new ApiError('Historique incomplet.');
-      const actionLabels = { claimed: 'Code pris en charge', claim: 'Code pris en charge', reward_claimed: 'Code pris en charge', issued: 'Utilisation enregistrée', issue: 'Utilisation enregistrée', reward_issued: 'Utilisation enregistrée', used: 'Rabais appliqué sur la facture', discount_applied: 'Rabais appliqué sur la facture', confirmed: 'Récompense attribuée', reward_confirmed: 'Récompense attribuée', preview_test_used:'Code consommé pour essai Preview, aucun rabais appliqué', manual_confirmed:'Bon créé manuellement', reward_sms_requested:'SMS demandé', reward_sms_result:'Résultat de la demande SMS', cancelled: 'Récompense annulée', cancel: 'Récompense annulée', reward_cancelled: 'Récompense annulée' };
+      const actionLabels = { claimed: 'Code pris en charge', claim: 'Code pris en charge', reward_claimed: 'Code pris en charge', issued: 'Utilisation enregistrée', issue: 'Utilisation enregistrée', reward_issued: 'Utilisation enregistrée', used: 'Rabais appliqué sur la facture', discount_applied: 'Rabais appliqué sur la facture', confirmed: 'Récompense attribuée', reward_confirmed: 'Récompense attribuée', preview_test_used:'Code consommé pour essai Preview, aucun rabais appliqué', duplicate_detected:'Tentative répétée signalée',manager_exception_granted:'Déblocage exceptionnel autorisé',manager_exception_consumed:'Exception utilisée pour un nouveau gain', manual_confirmed:'Bon créé manuellement', reward_sms_requested:'SMS demandé', reward_sms_result:'Résultat de la demande SMS', cancelled: 'Récompense annulée', cancel: 'Récompense annulée', reward_cancelled: 'Récompense annulée' };
       for (const event of events) {
         const item = node('li');
         const action = event.action === 'issued' && (event.details?.discountApplied === true || reward.discountApplied === true) ? 'Rabais appliqué sur la facture' : actionLabels[event.action] || 'Mise à jour de la récompense';
@@ -571,8 +597,8 @@
     let objectUrl;
     try {
       const query = new URLSearchParams();
-      const code = $('code-search').value.trim();
-      if (code) query.set('code', code);
+      const search = $('code-search').value.trim();
+      if (search) query.set('search', search);
       if ($('status-filter').value) query.set('status', $('status-filter').value);
       const response = await fetch('/api/admin/export' + (query.size ? '?' + query.toString() : ''), { credentials: 'same-origin', cache: 'no-store', headers: { Accept: 'text/csv' } });
       if (response.status === 401 || response.status === 403) { showAccess(response.status); return; }

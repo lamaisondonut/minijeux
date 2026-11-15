@@ -30,7 +30,7 @@ const matrix = [
       assert.match(status.headers.get('cache-control'), /no-store/);
       const body = await status.json();
       assert.equal(body.mode, 'pending'); assert.equal(body.rewardsEnabled, false);
-      assert.ok(!/budget|remainingCents|usedCents|phone|employee/i.test(JSON.stringify(body)));
+      const {phoneVerificationMode,...publicStatus}=body;assert.ok(['unverified','sms',null].includes(phoneVerificationMode));assert.ok(!/budget|remainingCents|usedCents|phone|employee/i.test(JSON.stringify(publicStatus)));
       const asset = await mf.dispatchFetch('https://preview.example/');
       assert.equal(await asset.text(), 'static-asset-ok');
       for (const pathname of ['/admin/', '/admin%2Findex.html', '/api/admin/me']) {

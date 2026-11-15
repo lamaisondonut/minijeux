@@ -1,9 +1,10 @@
+import { phoneVerificationMode } from './launch-mode.mjs';
 import { ApiError, secureId, torontoDay } from './common.mjs';
 import { normalizePhone, privateHmac } from './sms.mjs';
 import { stmt } from './store.mjs';
 
 export function notificationConfigured(env) {
-  return env.NOTIFICATION_SMS_ENABLED==='true' && env.SMS_APPROVED==='true' && env.TERMS_APPROVED==='true' &&
+  return phoneVerificationMode(env)==='sms' && env.NOTIFICATION_SMS_ENABLED==='true' && env.SMS_APPROVED==='true' && env.TERMS_APPROVED==='true' &&
     /^AC[0-9a-fA-F]{32}$/.test(env.TWILIO_ACCOUNT_SID||'') && typeof env.TWILIO_AUTH_TOKEN==='string' && env.TWILIO_AUTH_TOKEN.length>=10 &&
     /^MG[0-9a-fA-F]{32}$/.test(env.TWILIO_MESSAGING_SERVICE_SID||'') && Number.isInteger(Number(env.NOTIFICATION_SMS_DAILY_LIMIT)) && Number(env.NOTIFICATION_SMS_DAILY_LIMIT)>=1 && Number(env.NOTIFICATION_SMS_DAILY_LIMIT)<=100;
 }

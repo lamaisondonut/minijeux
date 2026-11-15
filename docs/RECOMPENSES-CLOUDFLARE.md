@@ -1,3 +1,5 @@
+**Version actuelle : lancement sans SMS, jeu illimité, contrôles téléphone/navigateur et accès du personnel par courriel. Voir [la procédure actuelle](LANCEMENT-SANS-SMS.md). Les descriptions SMS ci-dessous concernent désormais le mode optionnel futur.**
+
 # Récompenses — mise en place Cloudflare et exploitation
 
 État au 14 novembre 2026 : implémentation et essais locaux sur la branche `develop/noel-recompenses-v1`. La production n'a pas été modifiée. Aucun compte Cloudflare, service SMS ou paiement n'est activé par ce document. Les identifiants Cloudflare nécessaires à la création et à la liaison de D1 ne sont pas disponibles dans cet environnement.

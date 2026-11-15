@@ -1,3 +1,5 @@
+**Version actuelle : lancement sans SMS, jeu illimité, contrôles téléphone/navigateur et accès du personnel par courriel. Voir [la procédure actuelle](LANCEMENT-SANS-SMS.md). Les descriptions SMS ci-dessous concernent désormais le mode optionnel futur.**
+
 # Budget configurable, rabais alimentaires et administration — branche de développement
 
 Branche : `develop/noel-budget-configurable`, issue de `develop/noel-recompenses-v1` au commit `6aa8273`. La branche de production `livraison-v3` n’est pas modifiée. Aucune migration distante, activation de gains, modification de liaison ou publication de production n’est effectuée par ce travail.

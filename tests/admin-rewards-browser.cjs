@@ -9,7 +9,7 @@ const root = path.resolve(__dirname, '..', 'v3');
 const artifacts = '/tmp/admin-rewards-artifacts';
 const employeeA = { sub: 'employee-a', subject: 'employee-a', name: 'Ariane Test', email: 'ariane@example.test', role: 'staff' };
 const employeeB = { sub: 'employee-b', subject: 'employee-b', name: 'Benoît Test', email: 'benoit@example.test', role: 'manager' };
-const fixture = (overrides = {}) => ({ id: 'reward-test-1', code: 'NOEL-TEST-0001', firstName: 'Camille', lastName: 'Essai', score: 7500, valueCents: 1000, status: 'pending', confirmedAt: '2026-11-14T12:00:00Z', claimBy: '2026-12-14T12:00:00Z', claimedAt: null, claimedBy: null, issuedAt: null, issuedBy: null, discountApplied: false, ...overrides });
+const fixture = (overrides = {}) => ({ id: 'reward-test-1', code: 'NOEL-TEST-0001', firstName: 'Camille', lastName: 'Essai', score: 7500, valueCents: 1000, status: 'pending', confirmedAt: '2026-11-14T12:00:00Z', claimBy: '2026-12-14T12:00:00Z', claimedAt: null, claimedBy: null, issuedAt: null, issuedBy: null, discountApplied: false, phone:'+15145551234',phoneVerified:false, ...overrides });
 const budget = { month: '2026-11', budgetCents: 10000, usedCents: 1000, reservedCents: 1000, remainingCents: 8000, pendingCount: 1, usedCount: 2, countScope: 'all', defaultBudgetCents: 10000, revision: 0, defaultRevision: 0, minimumBudgetCents: 2000, minimumFutureBudgetCents: 2000, updatedAt: null, updatedBy: null, updatedByName: null };
 const deferred = () => { let resolve; const promise = new Promise((done) => { resolve = done; }); return { promise, resolve }; };
 
@@ -38,13 +38,15 @@ async function mockApi(page, options = {}) {
     const url = new URL(request.url());
     const endpoint = url.pathname.slice('/api/admin'.length);
     if (options.intercept && await options.intercept({ route, request, url, endpoint, send, record, employee })) return;
-    if (endpoint === '/me') return send(route, options.meStatus || 200, options.meStatus ? { error: 'test', message: 'Accès indisponible pour ce test.' } : { employee,previewTestRedemption:options.previewTestRedemption===true });
+    if (endpoint === '/me') return send(route, options.meStatus || 200, options.meStatus ? { error: 'test', message: 'Accès indisponible pour ce test.' } : { employee,previewTestRedemption:options.previewTestRedemption===true,phoneVerificationMode:options.phoneVerificationMode||'unverified',notificationSmsEnabled:options.notificationSmsEnabled===true });
     if (endpoint === '/identity') return send(route, 200, { sub: employee.sub, email: employee.email });
     if (endpoint === '/budget') return send(route, 200, options.budgetRecord?.value || options.budget || budget);
     if (endpoint === '/rewards') {
       let rows = options.rows || [record.reward];
       const code = url.searchParams.get('code');
+      const search=url.searchParams.get('search');
       const status = url.searchParams.get('status');
+      if(search){const fold=v=>String(v||'').normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim().replace(/\s+/g,' ');const digits=v=>{const d=String(v||'').replace(/\D/g,'');return d.length===10?'1'+d:d;};rows=rows.filter(row=>row.code.toUpperCase()===search.toUpperCase()||fold([row.firstName,row.lastName].join(' ')).includes(fold(search))||(digits(search).length>=10&&digits(row.phone)===digits(search)));}
       if (code) rows = rows.filter((row) => row.code === code);
       if (status) rows = rows.filter((row) => row.status === status);
       return send(route, 200, { rewards: rows, nextCursor: null });
@@ -129,7 +131,7 @@ async function main() {
         }
         await page.locator('#code-search').fill('NOT-A-CODE');
         await page.locator('#search-form button').click();
-        await page.locator('#list-state h3').filter({ hasText: 'CODE INTROUVABLE' }).waitFor();
+        await page.locator('#list-state h3').filter({ hasText: 'AUCUN RÉSULTAT' }).waitFor();
         assert.equal(await page.locator('#detail-content').isVisible(), false, 'previous code stayed actionable after failed search');
         await page.close();
       }
@@ -223,7 +225,7 @@ async function main() {
       await page.locator('.reward-row').click();
       await page.locator('#audit-state').filter({ hasText: 'momentanément indisponible' }).waitFor();
       await page.locator('#code-search').fill('NOT-A-CODE'); await page.locator('#search-form button').click();
-      await page.locator('#list-state h3').filter({ hasText: 'CODE INTROUVABLE' }).waitFor();
+      await page.locator('#list-state h3').filter({ hasText: 'AUCUN RÉSULTAT' }).waitFor();
       await page.locator('#code-search').fill(''); await page.locator('#status-filter').selectOption('issued');
       await page.locator('#list-state').filter({ hasText: 'Aucune récompense trouvée' }).waitFor();
       await page.locator('#status-filter').selectOption('pending');
@@ -439,6 +441,36 @@ async function main() {
       assert.match(await page.locator('#use-form').innerText(),/aucun rabais dans Lightspeed/);
       await page.locator('#discount-confirm').check();await page.locator('#use-confirm').click();await page.locator('#notification').filter({hasText:'Code consommé pour l’essai Preview'}).waitFor();
       assert.deepEqual(calls,[{previewTestConsumed:true}]);await page.close();
+    });
+    await test('name and declared phone search finds every customer reward, with no SMS action at launch',async()=>{
+      const page=await browser.newPage({viewport:{width:390,height:844}}),searches=[];
+      const rows=[fixture({id:'emilie-pending',firstName:'Émilie',lastName:'Noël',code:'GOAT-EMILIE-1'}),fixture({id:'emilie-used',firstName:'Émilie',lastName:'Noël',code:'GOAT-EMILIE-2',status:'issued'}),fixture({id:'other',firstName:'Autre',lastName:'Client',phone:'+15145551235',code:'GOAT-OTHER'})];
+      await mockApi(page,{rows,intercept:async({endpoint,url})=>{if(endpoint==='/rewards')searches.push(url.searchParams.get('search'));return false;}});
+      await page.goto(origin+'/admin/');await page.locator('.reward-row').first().waitFor();
+      await page.locator('#code-search').fill('emilie noel');await page.locator('#search-form button').click();
+      await page.waitForFunction(()=>document.querySelectorAll('.reward-row').length===2);assert.equal(searches.at(-1),'emilie noel');
+      await page.locator('.reward-row').first().click();assert.match(await page.locator('#detail-facts').innerText(),/Téléphone fourni.*\+15145551234/s);assert.match(await page.locator('#detail-facts').innerText(),/Numéro déclaré, non vérifié par SMS/);
+      assert.equal(await page.getByRole('button',{name:'Renvoyer le SMS du code'}).count(),0);
+      await page.locator('#code-search').fill('(514) 555-1234');await page.locator('#search-form button').click();
+      await page.waitForFunction(()=>document.querySelectorAll('.reward-row').length===2);assert.equal(searches.at(-1),'(514) 555-1234');
+      await page.locator('.reward-row').nth(1).click();assert.equal(await page.locator('#detail-code').innerText(),'GOAT-EMILIE-2');
+      assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth));await page.close();
+    });
+    await test('declared phone text is inert and SMS tools require explicit enabled metadata',async()=>{
+      const page=await browser.newPage(),attack='<img src=x onerror="window.phoneXss=1">';
+      await mockApi(page,{record:{reward:fixture({phone:attack}),claims:0,uses:0}});await openReward(page,origin);
+      assert.ok((await page.locator('#detail-facts').innerText()).includes(attack));assert.equal(await page.evaluate(()=>window.phoneXss),undefined);assert.equal(await page.locator('#detail-facts img').count(),0);await page.close();
+      const sms=await browser.newPage();await mockApi(sms,{notificationSmsEnabled:true,phoneVerificationMode:'sms'});await openReward(sms,origin);assert.equal(await sms.getByRole('button',{name:'Renvoyer le SMS du code'}).count(),1);await sms.close();
+    });
+    await test('manager sees eligibility and duplicate signals and authorizes a justified shared-device unlock',async()=>{
+      const page=await browser.newPage({viewport:{width:390,height:844}}),calls=[];let unlocked=false;
+      await mockApi(page,{employee:employeeB,intercept:async({endpoint,request,route,send})=>{
+        if(endpoint.endsWith('/eligibility')){await send(route,200,{potentialDuplicate:true,phone:{blocked:true,nextEligibleAt:'2026-12-14T12:00:00Z'},device:{tracked:true,blocked:!unlocked,nextEligibleAt:'2026-12-14T12:00:00Z',exceptionAvailable:unlocked,exceptionExpiresAt:'2026-11-16T12:00:00Z'},history:[{code:'GOAT-HISTORIQUE',fullName:'Camille Essai',valueCents:1000,confirmedAt:'2026-11-14T12:00:00Z'}],signals:[{createdAt:'2026-11-15T12:00:00Z',reason:'device_cooldown',differentName:true}]});return true;}
+        if(endpoint.endsWith('/unlock')){calls.push(request.postDataJSON());unlocked=true;await send(route,200,{exceptions:[{scope:'device'}]});return true;}return false;
+      }});
+      await openReward(page,origin);await page.locator('#unlock-confirm').waitFor();assert.match(await page.locator('#eligibility-section').innerText(),/Doublon potentiel/);
+      await page.locator('#unlock-confirm').click();assert.equal(calls.length,0);await page.locator('#unlock-scope').selectOption('device');await page.locator('#unlock-reason').fill('Appareil partagé au restaurant');await page.locator('#unlock-confirm').click();
+      await page.locator('#notification').filter({hasText:'Déblocage exceptionnel enregistré'}).waitFor();await page.locator('#eligibility-section').filter({hasText:'déblocage autorisé'}).waitFor();assert.equal(calls.length,1);assert.equal(calls[0].scope,'device');assert.equal(calls[0].reason,'Appareil partagé au restaurant');await page.close();
     });
     process.stdout.write(checks + ' admin browser checks passed. Screenshots: ' + artifacts + '\n');
   } finally { await browser.close(); await new Promise((resolve) => server.close(resolve)); }

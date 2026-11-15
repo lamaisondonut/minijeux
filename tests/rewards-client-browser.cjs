@@ -179,10 +179,43 @@ const text = page => page.locator('#rewardClaim').innerText();
    await test.close();
   }
   {
+   let startBody,claimAttempts=0;const claimBodies=[];
+   const test=await open(browser,{name:'launch immediate claim without SMS',handle:async(pathname,body)=>{
+    if(pathname==='/api/games/start'){startBody=body;return{body:{sessionId:'direct-claim-session',seed:fixture.seed,mode:'rewards',phoneVerificationMode:'unverified',engineVersion:ENGINE_VERSION,capCents:1000,expiresAt:new Date(Date.now()+1800000).toISOString(),policyVersion:'rewards-no-sms-2026-11-v1'}};}
+    if(pathname==='/api/games/finish'){const replay=replayGame({seed:fixture.seed,width:startBody.width,height:startBody.height,mode:'rewards',...body});assert.equal(replay.score,fixture.expectedScore);return{body:{score:replay.score,eligible:true,mode:'rewards',capCents:1000,claimDeadline:new Date(Date.now()+600000).toISOString()}};}
+    if(pathname==='/api/rewards/claim'){claimBodies.push(body);claimAttempts++;if(claimAttempts===1)return{status:503,body:{message:'Réponse de confirmation interrompue.'}};return{body:{awarded:true,score:fixture.expectedScore,reward:{id:'direct-reward-unique',code:'GOAT-11223344556677889900AABBCCDDEEFF',valueCents:1000,phoneVerified:false,firstName:'Camille',lastName:'Boréale',confirmedAt:new Date().toISOString(),claimBy:new Date(Date.now()+2592000000).toISOString(),status:'pending'}}};}
+   }}),{page}=test;
+   check(await page.locator('input').count()===0,'direct launch has no identity or phone form before playing');
+   check((await page.locator('.boreal-reward-info').innerText()).includes('Aucun SMS requis'),'launch menu clearly offers rewards without a required SMS');
+   await page.click('#start');await page.waitForFunction(()=>rewardsTest.state().shared?.mode==='rewards');
+   await page.evaluate(({ticks,jumps})=>rewardsTest.playTo(ticks,jumps),fixture);await page.locator('input[name=phone]').waitFor();
+   check((await text(page)).includes('Aucun SMS ne sera envoyé')&&await page.locator('input[name=code]').count()===0,'winning form asks name and unverified phone without a verification code step');
+   await page.locator('input[name=firstName]').fill('Camille');await page.locator('input[name=lastName]').fill('Boréale');await page.locator('input[name=phone]').fill('+15145551234');await page.locator('input[name=consent]').check();
+   await page.getByRole('button',{name:'Obtenir mon code',exact:true}).click();await page.getByRole('button',{name:'Réessayer ma demande',exact:true}).waitFor();
+   check(await page.locator('input[name=phone]').isDisabled(),'uncertain direct claim retains its exact phone and request for idempotent retry');
+   check(await page.locator('.reward-code').count()===0,'direct code is never fabricated before the server confirms attribution');
+   await page.getByRole('button',{name:'Réessayer ma demande',exact:true}).click();await page.locator('.reward-code').waitFor();
+   check(JSON.stringify(claimBodies[0])===JSON.stringify(claimBodies[1])&&claimBodies[1].sessionId==='direct-claim-session','direct retry sends identical identity and winning session');
+   check((await page.locator('.reward-code').innerText()).startsWith('GOAT-')&&(await text(page)).includes('capture d’écran'),'server reward code is immediately visible and can be kept by screenshot');
+   check(test.requests.every(r=>!r.pathname.includes('/sms/')&&r.pathname!=='/api/rewards/notification'),'launch claim and confirmation call no SMS endpoint');
+   check(await page.getByRole('button',{name:'Renvoyer le code par SMS',exact:true}).count()===0,'SMS notifications stay hidden while disabled');
+   const storage=await page.evaluate(()=>JSON.stringify({...localStorage,...sessionStorage}));check(!/15145551234|Camille|Boréale|11223344556677889900/.test(storage),'direct identity and code are absent from browser storage');
+   check(test.requests.filter(r=>r.pathname==='/api/games/start').length===1,'claim retry preserves the same completed game');
+   await page.getByRole('button',{name:'Voir le résultat',exact:true}).click();
+   await page.evaluate(seed=>{const original=crypto.getRandomValues.bind(crypto);crypto.getRandomValues=(a)=>{original(a);if(a instanceof Uint32Array&&a.length===1)a[0]=seed;return a;};},fixture.seed);
+   await page.click('#retry');await page.waitForFunction(()=>rewardsTest.state().mode==='playing');
+   check(test.requests.filter(r=>r.pathname==='/api/games/start').length===1,'already awarded player can replay immediately without another reward reservation');
+   await page.evaluate(({ticks,jumps})=>rewardsTest.playTo(ticks,jumps),fixture);
+   await page.getByRole('heading',{name:'Bravo pour ton score ! 🌲',exact:true}).waitFor();
+   check((await text(page)).includes('Tu peux continuer à jouer autant que tu le souhaites')&&(await text(page)).includes('Prochaine admissibilité'),'restricted winning score shows the friendly message and a reliable next eligibility date');
+   check(claimBodies.length===2,'unlimited practice never submits a second reward claim');
+   await test.close();
+  }
+  {
    let startBody,finishAttempts=0,verifyAttempts=0,smsRequests=0;
    const finishBodies=[];
-   const test=await open(browser,{name:'real winning replay and verified SMS',handle:async(pathname,body)=>{
-    if(pathname==='/api/games/start'){startBody=body;return{body:{sessionId:'genuine-winning-session',seed:fixture.seed,mode:'rewards',engineVersion:ENGINE_VERSION,capCents:1000,expiresAt:new Date(Date.now()+1800000).toISOString(),policyVersion:'test-policy'}}}
+   const test=await open(browser,{name:'real winning replay and verified SMS',status:status({phoneVerificationMode:'sms',notificationSmsEnabled:true}),handle:async(pathname,body)=>{
+    if(pathname==='/api/games/start'){startBody=body;return{body:{sessionId:'genuine-winning-session',seed:fixture.seed,mode:'rewards',phoneVerificationMode:'sms',engineVersion:ENGINE_VERSION,capCents:1000,expiresAt:new Date(Date.now()+1800000).toISOString(),policyVersion:'test-policy'}}}
     if(pathname==='/api/games/finish'){
      finishBodies.push(body);finishAttempts++;
      if(finishAttempts===1)return{status:503,body:{message:'Réessaie après cette interruption de test.'}};
@@ -221,7 +254,7 @@ const text = page => page.locator('#rewardClaim').innerText();
    await page.locator('input[name=firstName]').fill('JacquesTest');await page.locator('input[name=lastName]').fill('BorealTest');await page.locator('input[name=phone]').fill('+15145551234');await page.locator('input[name=consent]').check();
    await page.getByRole('button',{name:'Recevoir mon code SMS'}).click();await page.locator('input[name=code]').waitFor();
    const sms=test.requests.find(r=>r.pathname==='/api/rewards/sms/request').body;
-   check(sms.sessionId==='genuine-winning-session'&&sms.phone==='+15145551234'&&sms.firstName==='JacquesTest'&&sms.lastName==='BorealTest'&&sms.consentVersion==='discounts-food-2026-11-v2','SMS identity and consent are requested only after the verified winning run');
+   check(sms.sessionId==='genuine-winning-session'&&sms.phone==='+15145551234'&&sms.firstName==='JacquesTest'&&sms.lastName==='BorealTest'&&sms.consentVersion==='rewards-no-sms-2026-11-v1','SMS identity and consent are requested only after the verified winning run');
    check(await page.locator('.reward-code').count()===0,'requesting an SMS still does not confirm a gain');
    await page.getByRole('button',{name:'Modifier mon numéro',exact:true}).click();
    check(await page.locator('input[name=firstName]').inputValue()==='JacquesTest'&&await page.locator('input[name=phone]').inputValue()==='+15145551234','phone correction returns to prefilled identity without restarting the game');

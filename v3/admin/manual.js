@@ -7,10 +7,10 @@
     const response=await fetch('/api/admin/'+path,{method:body?'POST':'GET',credentials:'same-origin',cache:'no-store',headers:{Accept:'application/json',...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});
     const data=await response.json();if(!response.ok){const e=Error(data.message||'Opération indisponible');e.status=response.status;throw e;}return data;
   }
-  api('me').then(({employee})=>{
+  api('me').then(({employee,notificationSmsEnabled})=>{
     if(employee?.role!=='manager')return;
     const section=node('section');section.className='surface manual-panel';section.style.padding='24px';section.style.marginBottom='24px';
-    section.append(node('h2','Créer un bon manuellement'),node('p','Réservé au gestionnaire. Le bon est à usage unique, valable 30 jours et applicable aux aliments seulement. Le téléphone sert au contrôle des 30 jours ; cette émission manuelle ne constitue pas une vérification SMS de l’identité.'));
+    section.append(node('h2','Créer un bon manuellement'),node('p','Réservé au gestionnaire. Le bon est à usage unique, valable 30 jours et applicable aux aliments seulement. Le téléphone déclaré sert au contrôle des 30 jours et n’est pas vérifié par SMS.'));
     const form=node('form');form.className='manual-form';
     const inputs={};
     for(const [id,label,type] of [['firstName','Prénom','text'],['lastName','Nom','text'],['phone','Téléphone du bénéficiaire','tel'],['reason','Justification de l’émission manuelle','text']]) {
@@ -44,7 +44,7 @@
           busy=true;lock(true);confirm.disabled=true;for(const c of review.querySelectorAll('input,textarea'))c.disabled=true;
           try {
             const data=await api('manual-rewards',operation);const reward=data.reward;review.replaceChildren(node('h3','Bon créé : '+money(reward.valueCents)),node('p','Code : '+reward.code),node('p','Valable jusqu’au '+new Date(reward.claimBy).toLocaleString('fr-CA')),node('p','Applicable exclusivement aux aliments. Aucun rabais sur les boissons alcooliques. Portion inutilisée perdue, sans échange contre de l’argent.'));
-            message.textContent=data.notification?.status==='accepted'?'SMS pris en charge par le fournisseur.':'Code enregistré. Envoi SMS '+(data.notification?.status==='disabled'?'désactivé.':'non confirmé : vérifiez les messages avant un renvoi.');
+            message.textContent=notificationSmsEnabled===true?(data.notification?.status==='accepted'?'SMS pris en charge par le fournisseur.':'Code enregistré. Vérifiez les messages avant tout renvoi.'): 'Code enregistré. Le client peut le conserver par capture d’écran.';
             operation=null;quoted=null;form.reset();document.dispatchEvent(new Event('boreal:admin-changed'));
           } catch(error) {
             message.textContent=error.message;
