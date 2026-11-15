@@ -16,7 +16,16 @@ const reasonText = {
   challenge_expired: 'Le code SMS a expiré. Reviens au résultat pour demander un nouveau code.',
   session_not_eligible: 'Cette partie ne peut plus confirmer une récompense.',
   session_expired: 'La validité de 30 minutes de cette partie est écoulée.',
-  configuration_pending: 'Les récompenses sont en préparation. L’entraînement reste disponible.',
+  configuration_pending: 'Les récompenses sont indisponibles pour le moment. Tu peux jouer en mode libre, sans récompense.',
+  verification_unavailable: 'La vérification est temporairement indisponible. Réessaie dans quelques instants.',
+  sms_daily_limit: 'La vérification SMS est indisponible pour le moment. Réessaie plus tard.',
+  phone_bound: 'Utilise le même numéro de téléphone que lors de ta première demande pour cette partie.',
+  consent_required: 'Accepte les conditions de la récompense avant de demander ton SMS.',
+  profile_missing: 'Ton prénom et ton nom sont requis pour confirmer le gain.',
+  turnstile_required: 'Termine la vérification de sécurité avant de commencer.',
+  turnstile_failed: 'La vérification de sécurité a échoué. Réessaie.',
+  engine_changed: 'Le jeu a été mis à jour. Recharge la page avant de commencer.',
+  owner_required: 'Retrouve cette confirmation dans le navigateur utilisé pour jouer.',
   attempts_exceeded: 'Le nombre de tentatives SMS est atteint.',
   rate_limited: 'Trop de demandes rapprochées. Patiente avant de réessayer.',
   verification_pending: 'La vérification est en cours. Réessaie dans quelques instants.'
@@ -47,7 +56,7 @@ async function api(path, data) {
   catch { throw new Error('Le service est temporairement indisponible. Réessaie.'); }
   finally { clearTimeout(timer); }
   let body; try { body = await response.json(); } catch { throw new Error('Le service est temporairement indisponible. Réessaie.'); }
-  if (!response.ok) { const error = new Error(reasonText[body.reason || body.error] || body.message || 'La demande n’a pas pu être terminée. Réessaie.'); error.status = response.status; error.reason = body.reason || body.error; throw error; }
+  if (!response.ok) { const error = new Error(reasonText[body.reason || body.error] || 'La demande n’a pas pu être terminée. Réessaie.'); error.status = response.status; error.reason = body.reason || body.error; throw error; }
   return body;
 }
 function currentStatus() {
@@ -55,11 +64,11 @@ function currentStatus() {
 }
 function conditions(status) {
   if (status.mode === 'extreme') return 'Défi extrême : vitesse et difficulté accrues. Aucune récompense monétaire.';
-  if (status.rewardsEnabled && status.mode === 'rewards') return `Mode récompenses. Plafond annoncé : ${money(status.capCents)}. Une récompense par numéro vérifié tous les 30 jours. Partie valable 30 minutes, pauses comprises. SMS après la partie gagnante seulement.`;
-  return 'Entraînement libre, sans compte. Aucune récompense monétaire disponible.';
+  if (status.rewardsEnabled && status.mode === 'rewards') return `Mode récompenses. Maximum annoncé : ${money(status.capCents)}. Une récompense par personne tous les 30 jours, après vérification SMS. Partie admissible pendant 30 minutes, pauses comprises.`;
+  return 'Mode libre — sans récompense. Joue sans compte pour battre ton record.';
 }
 async function securityToken(sitekey) {
-  if (!sitekey) throw new Error('Les parties récompensées se préparent. L’entraînement reste disponible.');
+  if (!sitekey) throw new Error('Les récompenses sont indisponibles pour le moment. Tu peux jouer en mode libre, sans récompense.');
   if (!window.turnstile) {
     if (!turnstileLoad) turnstileLoad = new Promise((resolve, reject) => {
       const script = document.createElement('script'); script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'; script.async = true;
@@ -80,7 +89,7 @@ async function securityToken(sitekey) {
   });
 }
 function startError(error) {
-  const box = showPanel('La partie se prépare', error.message);
+  const box = showPanel('Impossible de commencer cette partie', error.message);
   button(box, 'Réessayer', () => { hidePanel(); start(); });
   button(box, 'Jouer sans récompense', () => { hidePanel(); startPractice(); }, false);
   button(box, 'Retour au menu', hidePanel, false);
@@ -91,7 +100,7 @@ function launch(session, practice = false) {
   const thisRun = { session, state, jumps: [], resizes: [], practice, finished: false, finishPromise: null };
   if (state.width !== width || state.height !== height) { thisRun.resizes.push({ tick: 0, width, height }); resizeGame(state, width, height); }
   run = thisRun; challenge = null; pendingSession = null; $('rewardResultAction')?.remove(); hidePanel();
-  message(practice ? 'Entraînement — aucune récompense monétaire.' : session.mode === 'extreme' ? 'Défi extrême — aucune récompense monétaire.' : `Mode récompenses · Plafond réservé : ${money(session.capCents)} · Valable jusqu’à ${new Date(session.expiresAt).toLocaleTimeString('fr-CA', { hour: '2-digit', minute: '2-digit' })}.`);
+  message(practice ? 'Mode libre — sans récompense.' : session.mode === 'extreme' ? 'Défi extrême — aucune récompense monétaire.' : `Mode récompenses · Maximum : ${money(session.capCents)} · Admissible jusqu’à ${new Date(session.expiresAt).toLocaleTimeString('fr-CA', { hour: '2-digit', minute: '2-digit' })}.`);
   game.start({ state,
     step(s, jump) {
       if (jump) thisRun.jumps.push(s.ticks);
@@ -132,7 +141,7 @@ async function start() {
   try {
     if (pendingSession) {
       const session = pendingSession;
-      if (Date.parse(session.expiresAt) <= Date.now()) { pendingSession = null; throw new Error('La réservation a expiré. Commence une nouvelle partie.'); }
+      if (Date.parse(session.expiresAt) <= Date.now()) { pendingSession = null; throw new Error('Le délai pour commencer cette partie est écoulé. Commence une nouvelle partie.'); }
       launch(session); return;
     }
     await window.BorealRewardMenu?.ready;
@@ -152,11 +161,11 @@ async function start() {
 }
 async function finish(thisRun) {
   if (thisRun.practice) {
-    $('feedback').textContent = 'Entraînement terminé — aucune récompense monétaire. Rejoue librement, sans compte.';
+    $('feedback').textContent = 'Mode libre terminé — sans récompense. Rejoue pour battre ton record, sans compte.';
     return;
   }
   if (thisRun.finishPromise) return thisRun.finishPromise;
-  const box = showPanel('Vérification de la partie', 'Le serveur vérifie les sauts et le score. Aucun gain n’est confirmé à cette étape.');
+  const box = showPanel('Vérification de la partie', 'Ton score est en cours de vérification. Aucun gain n’est confirmé à cette étape.');
   thisRun.finishPromise = (async () => {
     try {
       const result = await api('/api/games/finish', { sessionId: thisRun.session.sessionId, ticks: thisRun.state.ticks, jumps: thisRun.jumps, resizes: thisRun.resizes });
@@ -174,12 +183,12 @@ async function finish(thisRun) {
     } catch (error) {
       thisRun.finishPromise = null;
       if (error.reason === 'session_expired') {
-        const expired = showPanel('Le délai annoncé est écoulé', 'La partie a dépassé sa validité de 30 minutes, pauses comprises. Ce score local ne donne plus droit à une récompense.');
+        const expired = showPanel('Le délai annoncé est écoulé', 'La partie a dépassé sa validité de 30 minutes, pauses comprises. Ce score ne donne plus droit à une récompense.');
         button(expired, 'Voir le résultat', hidePanel); return;
       }
-      const retry = showPanel('Vérification à réessayer', `${error.message} La preuve de la partie est conservée dans cette page.`);
+      const retry = showPanel('Vérification à réessayer', `${error.message} Ta partie est conservée dans cette page pour réessayer.`);
       button(retry, 'Réessayer la vérification', () => finish(thisRun));
-      button(retry, 'Voir mon score local', hidePanel, false);
+      button(retry, 'Voir mon résultat', hidePanel, false);
     }
   })();
   return thisRun.finishPromise;
@@ -194,7 +203,7 @@ function field(form, label, name, attributes) {
   const input = document.createElement('input'); input.name = name; Object.assign(input, attributes); wrap.append(input); form.append(wrap); return input;
 }
 function showWinner(thisRun) {
-  const box = showPanel(`${thisRun.result.score.toLocaleString('fr-CA')} points vérifiés`, `Palier admissible, sous réserve de la vérification SMS et de la règle d’une récompense par numéro tous les 30 jours. Plafond annoncé : ${money(thisRun.session.capCents)}. Aucun code n’est attribué avant confirmation du serveur.${thisRun.result.claimDeadline ? ' Vérification à terminer avant ' + new Date(thisRun.result.claimDeadline).toLocaleTimeString('fr-CA', { hour: '2-digit', minute: '2-digit' }) + '.' : ''}`);
+  const box = showPanel(`${thisRun.result.score.toLocaleString('fr-CA')} points vérifiés`, `Palier admissible, sous réserve de la vérification SMS et de la règle d’une récompense par personne tous les 30 jours. Maximum annoncé : ${money(thisRun.session.capCents)}. Aucun code n’est attribué avant la confirmation du gain.${thisRun.result.claimDeadline ? ' Vérification à terminer avant ' + new Date(thisRun.result.claimDeadline).toLocaleTimeString('fr-CA', { hour: '2-digit', minute: '2-digit' }) + '.' : ''}`);
   const form = document.createElement('form'); box.append(form);
   const first = field(form, 'Prénom', 'firstName', { required: true, maxLength: 80, autocomplete: 'given-name' });
   const last = field(form, 'Nom', 'lastName', { required: true, maxLength: 80, autocomplete: 'family-name' });
@@ -214,17 +223,17 @@ function showWinner(thisRun) {
   button(box, 'Plus tard sur cette page', hidePanel, false);
 }
 function showSmsCode(currentChallenge) {
-  const box = showPanel('Vérifie ton téléphone', 'Entre le code reçu par SMS. Aucun gain n’est confirmé avant la réponse du serveur.');
+  const box = showPanel('Vérifie ton téléphone', 'Entre le code reçu par SMS pour confirmer ton admissibilité. Ton gain sera confirmé après cette vérification.');
   const form = document.createElement('form'); box.append(form);
   const code = field(form, 'Code SMS', 'code', { required: true, inputMode: 'numeric', autocomplete: 'one-time-code', maxLength: 8, pattern: '[0-9]{6}' });
   const error = document.createElement('p'); error.role = 'status'; form.append(error);
-  const verify = document.createElement('button'); verify.className = 'primary'; verify.textContent = 'Vérifier et réclamer'; form.append(verify);
+  const verify = document.createElement('button'); verify.className = 'primary'; verify.textContent = 'Confirmer mon gain'; form.append(verify);
   form.addEventListener('submit', async event => {
     event.preventDefault(); if (!form.reportValidity()) return; verify.disabled = true; error.textContent = '';
     try {
       const result = await api('/api/rewards/sms/verify', { challengeId: currentChallenge.id, phone: currentChallenge.phone, code: code.value.trim() });
       if (result.awarded && result.reward?.code && [500,1000,2000].includes(result.reward.valueCents) && result.reward.confirmedAt && result.reward.claimBy) showAward(result);
-      else { error.textContent = reasonText[result.reason] || 'Aucune récompense attribuée. La limite est d’une récompense par numéro tous les 30 jours.'; verify.disabled = false; }
+      else { error.textContent = reasonText[result.reason] || 'Aucune récompense attribuée. La limite est d’une récompense par personne tous les 30 jours.'; verify.disabled = false; }
     } catch (problem) { error.textContent = problem.message; verify.disabled = false; }
   });
   button(box, 'Revenir au résultat', hidePanel, false);
@@ -234,7 +243,7 @@ function showAward(result) {
   const scoreText = Number.isSafeInteger(result.score) ? `Score vérifié : ${result.score.toLocaleString('fr-CA')} points. ` : '';
   const usable = reward.status === 'pending' && Date.parse(reward.claimBy) > Date.now();
   const statuses = { claimed: 'Ce code a déjà été présenté au restaurant.', issued: 'La carte-cadeau associée a déjà été remise.', cancelled: 'Cette récompense a été annulée.', expired: 'Le délai de présentation de ce code est écoulé.' };
-  const details = usable ? `Présente ce code en personne au restaurant avant le ${new Date(reward.claimBy).toLocaleDateString('fr-CA')}. Code à usage unique, valable 30 jours après attribution.` : (statuses[reward.status] || 'Le délai de présentation de ce code est écoulé.');
+  const details = usable ? `Présente ce code en personne aux Boréalistes avant le ${new Date(reward.claimBy).toLocaleDateString('fr-CA')}. Code à usage unique, valable 30 jours après attribution. Ce bon permet de réclamer ta carte-cadeau : le personnel la créera et te la remettra sur place. Le code n’est pas une carte-cadeau déjà émise.` : (statuses[reward.status] || 'Le délai de présentation de ce code est écoulé.');
   const box = showPanel(`${money(reward.valueCents)} attribués`, scoreText + details);
   const code = document.createElement('p'); code.className = 'reward-code'; code.textContent = reward.code; box.append(code);
   button(box, 'Copier le code', async event => {

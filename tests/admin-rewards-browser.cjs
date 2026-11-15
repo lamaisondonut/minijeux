@@ -10,7 +10,7 @@ const artifacts = '/tmp/admin-rewards-artifacts';
 const employeeA = { sub: 'employee-a', subject: 'employee-a', name: 'Ariane Test', email: 'ariane@example.test', role: 'staff' };
 const employeeB = { sub: 'employee-b', subject: 'employee-b', name: 'Benoît Test', email: 'benoit@example.test', role: 'manager' };
 const fixture = (overrides = {}) => ({ id: 'reward-test-1', code: 'NOEL-TEST-0001', firstName: 'Camille', lastName: 'Essai', score: 7500, valueCents: 1000, status: 'pending', confirmedAt: '2026-11-14T12:00:00Z', claimBy: '2026-12-14T12:00:00Z', claimedAt: null, claimedBy: null, issuedAt: null, issuedBy: null, lightspeedRef: null, ...overrides });
-const budget = { month: '2026-11', usedCents: 1000, reservedCents: 1000, remainingCents: 98000, pendingCount: 1 };
+const budget = { month: '2026-11', budgetCents: 10000, usedCents: 1000, reservedCents: 1000, remainingCents: 8000, pendingCount: 1, usedCount: 2, countScope: 'all' };
 const deferred = () => { let resolve; const promise = new Promise((done) => { resolve = done; }); return { promise, resolve }; };
 
 async function serve() {
@@ -40,7 +40,7 @@ async function mockApi(page, options = {}) {
     if (options.intercept && await options.intercept({ route, request, url, endpoint, send, record, employee })) return;
     if (endpoint === '/me') return send(route, options.meStatus || 200, options.meStatus ? { error: 'test', message: 'Accès indisponible pour ce test.' } : { employee });
     if (endpoint === '/identity') return send(route, 200, { sub: employee.sub, email: employee.email });
-    if (endpoint === '/budget') return send(route, 200, budget);
+    if (endpoint === '/budget') return send(route, 200, options.budget || budget);
     if (endpoint === '/rewards') {
       let rows = options.rows || [record.reward];
       const code = url.searchParams.get('code');
@@ -92,7 +92,13 @@ async function main() {
         const errors = []; page.on('pageerror', (error) => errors.push(error.message));
         await mockApi(page);
         await openReward(page, origin);
-        await page.locator('#budget-remaining').filter({ hasText: '980' }).waitFor();
+        await page.locator('#budget-remaining').filter({ hasText: '80,00' }).waitFor();
+        assert.match(await page.locator('#budget-total').innerText(), /100,00/);
+        assert.match(await page.locator('#budget-used').innerText(), /10,00/);
+        assert.equal(await page.locator('#budget-pending').innerText(), '1');
+        assert.equal(await page.locator('#budget-used-count').innerText(), '2');
+        assert.match(await page.locator('#budget-reserved').innerText(), /10,00.*parties en cours/);
+        assert.equal(await page.locator('#registry-title').innerText(), 'Derniers gagnants');
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'page overflows at ' + viewport.width);
         assert.equal(await page.locator('.brand img').evaluateAll((images) => images.every((img) => img.complete && img.naturalWidth > 0)), true, 'official logos did not load');
         await page.screenshot({ path: path.join(artifacts, 'admin-' + viewport.width + '.png'), fullPage: true });
@@ -100,6 +106,46 @@ async function main() {
         assert.equal(await page.evaluate(() => localStorage.length + sessionStorage.length), 0);
         await page.close();
       }
+    });
+
+    await test('exact code search opens the result, identifies used or expired codes, and clears stale actions', async () => {
+      for (const status of ['pending', 'claimed', 'issued', 'expired']) {
+        const page = await browser.newPage();
+        await mockApi(page, { record: { reward: fixture({ status, claimedBy: status === 'claimed' ? employeeB.sub : null }), claims: 0, issues: 0 } });
+        await page.goto(origin + '/admin/');
+        await page.locator('#status-filter').selectOption('cancelled');
+        await page.locator('#list-state').filter({ hasText: 'Aucune récompense trouvée' }).waitFor();
+        await page.locator('#code-search').fill('noel-test-0001');
+        await page.locator('#search-form button').click();
+        await page.locator('#detail-content').waitFor({ state: 'visible' });
+        assert.equal(await page.locator('#status-filter').inputValue(), '');
+        assert.equal(await page.locator('#detail-code').innerText(), 'NOEL-TEST-0001');
+        assert.match(await page.locator('#detail-facts').innerText(), /Date d’attribution/);
+        if (status === 'pending') assert.equal(await page.locator('#claim-button').innerText(), 'MARQUER COMME UTILISÉ');
+        else {
+          assert.equal(await page.locator('#detail-validation').innerText(), status === 'expired' ? 'CODE EXPIRÉ' : 'CODE DÉJÀ UTILISÉ');
+          assert.equal(await page.locator('#claim-button').count(), 0);
+          assert.equal(await page.locator('#issue-form').count(), 0);
+        }
+        await page.locator('#code-search').fill('NOT-A-CODE');
+        await page.locator('#search-form button').click();
+        await page.locator('#list-state h3').filter({ hasText: 'CODE INTROUVABLE' }).waitFor();
+        assert.equal(await page.locator('#detail-content').isVisible(), false, 'previous code stayed actionable after failed search');
+        await page.close();
+      }
+    });
+
+    await test('empty real registry shows zeros and no invented winners', async () => {
+      const page = await browser.newPage();
+      await mockApi(page, { rows: [], budget: { ...budget, usedCents: 0, reservedCents: 0, remainingCents: 10000, pendingCount: 0, usedCount: 0 } });
+      await page.goto(origin + '/admin/');
+      await page.locator('#budget-remaining').filter({ hasText: '100,00' }).waitFor();
+      assert.equal(await page.locator('#budget-pending').innerText(), '0');
+      assert.equal(await page.locator('#budget-used-count').innerText(), '0');
+      assert.equal(await page.locator('#budget-reserved').isVisible(), false);
+      assert.equal(await page.locator('.reward-row').count(), 0);
+      await page.locator('#list-state').filter({ hasText: 'Aucun gagnant à afficher pour le moment.' }).waitFor();
+      await page.close();
     });
 
     await test('claim server success precedes Lightspeed form; concurrent employee receives 409; single issuance', async () => {
@@ -172,13 +218,14 @@ async function main() {
       } });
       await page.goto(origin + '/admin/');
       await page.locator('#list-state').filter({ hasText: 'n’a pas pu être chargé' }).waitFor();
+      assert.doesNotMatch(await page.locator('#list-state').innerText(), /Test serveur/);
       await page.locator('#budget-error').waitFor();
       assert.equal(await page.locator('#budget-remaining').innerText(), '—');
       failList = false; await page.locator('#list-state button').click();
       await page.locator('.reward-row').click();
       await page.locator('#audit-state').filter({ hasText: 'momentanément indisponible' }).waitFor();
       await page.locator('#code-search').fill('NOT-A-CODE'); await page.locator('#search-form button').click();
-      await page.locator('#list-state').filter({ hasText: 'Aucune récompense trouvée' }).waitFor();
+      await page.locator('#list-state h3').filter({ hasText: 'CODE INTROUVABLE' }).waitFor();
       await page.locator('#code-search').fill(''); await page.locator('#status-filter').selectOption('issued');
       await page.locator('#list-state').filter({ hasText: 'Aucune récompense trouvée' }).waitFor();
       await page.locator('#status-filter').selectOption('pending');

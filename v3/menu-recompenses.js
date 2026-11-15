@@ -12,11 +12,11 @@
  :root{--boreal-dark:#2D351E;--boreal-olive:#666C37;--boreal-gold:#EFCD7A;--boreal-white:#FFFFFF}
  #home{align-items:flex-start;padding:16px 18px;background:linear-gradient(#17241a14,#18231b6e 65%,#17231ae8)}
  #home .panel{justify-content:flex-start;align-self:auto;min-height:100%;height:auto;max-width:430px;padding:0 12px 24px;gap:0}
- #home .brand{position:relative;top:auto;left:auto;right:auto;height:116px;display:flex;align-items:flex-start;justify-content:center;margin:0 0 72px;letter-spacing:0}
- .boreal-brand-logo{display:block;width:104px;height:104px;object-fit:contain;background:#fff;border:1px solid #efcd7a7a;border-radius:12px;box-shadow:0 5px 24px #14211444}
+ #home .brand{position:relative;top:auto;left:auto;right:auto;min-height:22px;display:flex;align-items:flex-start;justify-content:center;margin:0 0 34px;font-size:13px;letter-spacing:.18em}
  #home h1{font-size:clamp(38px,10vw,48px);margin:0 0 12px;line-height:.94;width:max-content;max-width:100%;color:#fff}
  #home h1 em{color:var(--boreal-gold)}#home .noelEdition{color:var(--boreal-gold);border-color:#efcd7a99;margin:0 0 12px}
- #home .panel>p:first-of-type,#home .tips{display:none}
+ #home .panel>p:first-of-type{font-size:12px;line-height:1.45;max-width:none;margin:18px 0 10px}
+ #home .tips{display:grid;margin:0 0 12px;gap:6px}#home .tip{font-size:10px;padding:8px 4px}#home .tip b{font-size:19px;margin-bottom:4px}
  #home button{min-height:44px;margin-top:7px;font-size:12px;border-radius:11px}
  #home button.primary{background:var(--boreal-gold);color:var(--boreal-dark);border-color:#fff0b9;box-shadow:0 4px 18px #0004}
  #home button.alt{background:#2d351edb;border-color:#efcd7a88;color:#fff}
@@ -29,13 +29,12 @@
  .boreal-reward-tiers .unavailable{opacity:.62;background:#ffffff0a}.boreal-reward-tiers small{display:block;font-size:9px}
  .boreal-menu-notice:empty{display:none}#home .boreal-menu-notice{font-size:12px;color:var(--boreal-gold);text-align:left;margin:6px 0}
  .boreal-credit{display:flex;align-items:center;justify-content:center;gap:7px;margin:12px 0 0;color:#fff;font-size:10px;line-height:1.5;flex-wrap:wrap}
- .boreal-credit img{display:block;width:72px;height:28px;object-fit:contain;background:#fff;padding:4px;border-radius:6px}
  #home .panel>p:last-of-type{font-size:10px;margin:10px 0 0;color:#fff}
  .boreal-rules-dialog{position:fixed;inset:0;z-index:20;display:none;align-items:center;justify-content:center;background:#1a2419ef;padding:18px}
  .boreal-rules-dialog.open{display:flex}.boreal-rules-content{width:min(100%,480px);max-height:85vh;overflow:auto;background:#2D351E;color:#fff;border:1px solid #EFCD7A;border-radius:16px;padding:22px;text-align:left}
  .boreal-rules-content h2{font-size:25px;color:#EFCD7A}.boreal-rules-content p{max-width:none;font-size:14px}.boreal-rules-content a{color:#EFCD7A}
- @media(max-height:650px){#home .brand{height:90px;margin-bottom:28px}.boreal-brand-logo{width:80px;height:80px}#home h1{font-size:38px}#home .panel{padding-bottom:15px}#home .boreal-reward-info{padding:9px;margin-top:40px}#home .boreal-reward-info p{font-size:11px}.boreal-credit{margin-top:9px}}
- @media(max-height:500px) and (orientation:landscape){#home .panel{min-height:0}#home .brand{height:75px;margin-bottom:20px}.boreal-brand-logo{width:66px;height:66px}}
+ @media(max-height:650px){#home .brand{margin-bottom:34px}#home h1{font-size:38px}#home .panel{padding-bottom:15px}#home .boreal-reward-info{padding:9px}#home .boreal-reward-info p{font-size:11px}.boreal-credit{margin-top:9px}}
+ @media(max-height:500px) and (orientation:landscape){#home .panel{min-height:0}#home .panel>p:first-of-type{display:block}}
  `;
  document.head.appendChild(style);
  const layout=()=>requestAnimationFrame(()=>window.dispatchEvent(new Event('boreal:menu-layout')));
@@ -47,10 +46,9 @@
  const rules=document.createElement('button');rules.type='button';rules.className='alt boreal-rules-button';rules.textContent='RÈGLEMENT ET CONDITIONS';rules.id='boreal-open-rules';panel.insertBefore(rules,start||null);
  const notice=document.createElement('p');notice.className='boreal-menu-notice';notice.id='boreal-menu-notice';notice.setAttribute('role','status');panel.insertBefore(notice,start||null);
  const credit=document.createElement('div');credit.className='boreal-credit';const signature=document.createElement('span');signature.textContent='Un jeu imaginé et développé par GOAT Agence';
- const goat=new Image();goat.src='assets/branding/goat-wordmark.png';goat.alt='GOAT Agence';credit.append(signature,goat);panel.append(credit);
- const logo=new Image();logo.src='assets/branding/borealistes-logo.png';logo.alt='Les Boréalistes — Buvette locale';logo.className='boreal-brand-logo';logo.onload=()=>{const brand=home.querySelector('.brand');if(brand){brand.textContent='';brand.append(logo)}layout()};
+ credit.append(signature);panel.append(credit);
  const dialog=document.createElement('section');dialog.className='boreal-rules-dialog';dialog.id='boreal-rules';dialog.setAttribute('role','dialog');dialog.setAttribute('aria-modal','true');dialog.setAttribute('aria-label','Règlement et conditions');
- dialog.innerHTML='<div class="boreal-rules-content"><h2>Règlement du Défi Boréal</h2><p>En mode récompenses, les paliers et le plafond proposé sont annoncés avant le départ et réservés pour cette partie. Une seule récompense est attribuée : le plus haut palier atteint parmi ceux proposés.</p><p>Une seule récompense par personne tous les 30 jours, contrôlée au moyen d’un numéro vérifié. Utiliser plusieurs numéros pour contourner cette règle est interdit. Une vérification par SMS est demandée uniquement pour réclamer un gain. Aucun compte n’est requis pour jouer.</p><p>Le code GOAT confirmé doit être présenté aux Boréalistes dans les 30 jours. Ce délai concerne la réclamation du prix, et non la durée de validité de la carte-cadeau émise manuellement dans Lightspeed.</p><p>En mode Défi extrême ou lorsque les récompenses sont en préparation, aucune récompense monétaire n’est offerte.</p><p><a href="reglement.html" target="_blank" rel="noopener">Lire le règlement complet et la confidentialité</a></p><button type="button" id="boreal-close-rules" class="primary">FERMER</button></div>';
+ dialog.innerHTML='<div class="boreal-rules-content"><h2>Règlement du Défi Boréal</h2><p>En mode récompenses, les paliers offerts sont annoncés avant le départ. Une seule récompense est attribuée : le plus haut palier atteint parmi ceux proposés, après vérification du score et de l’admissibilité.</p><p>Une seule récompense par personne tous les 30 jours, contrôlée au moyen d’un numéro vérifié. Utiliser plusieurs numéros pour contourner cette règle est interdit. Une vérification par SMS est demandée uniquement après une partie admissible. Aucun compte n’est requis pour jouer.</p><p>La partie peut durer au plus 15 minutes de jeu et reste admissible pendant 30 minutes, pauses comprises. La vérification SMS doit être terminée dans les 10 minutes suivant la fin et avant cette limite de 30 minutes.</p><p>Le code de récompense confirmé doit être présenté en personne aux Boréalistes dans les 30 jours. Le personnel remet alors la carte-cadeau correspondante. Le code n’est pas une carte-cadeau déjà émise. Le délai de présentation ne limite pas la durée de validité de la carte-cadeau remise.</p><p>Le mode libre et le Défi extrême permettent de jouer pour battre son record, sans récompense monétaire. Le Défi extrême est plus rapide, avec des obstacles plus rapprochés. Le mode est annoncé avant le départ et reste le même pendant la partie.</p><p><a href="reglement.html" target="_blank" rel="noopener">Lire le règlement complet et la confidentialité</a></p><button type="button" id="boreal-close-rules" class="primary">FERMER</button></div>';
  $('app').append(dialog);rules.setAttribute('aria-controls',dialog.id);let previousFocus;
  const close=()=>{dialog.classList.remove('open');previousFocus?.focus()};
  rules.onclick=()=>{previousFocus=document.activeElement;dialog.classList.add('open');dialog.querySelector('a,button').focus()};dialog.querySelector('#boreal-close-rules').onclick=close;
@@ -59,15 +57,15 @@
  const tierDefinitions=[{score:5000,valueCents:500},{score:7500,valueCents:1000},{score:10000,valueCents:2000}];
  const paragraph=text=>{const p=document.createElement('p');p.textContent=text;description.append(p)};
  function renderStatus(raw){
-  const cap=Number(raw?.capCents),enabled=raw?.mode==='rewards'&&raw?.rewardsEnabled===true&&[500,1000,2000].includes(cap);
-  const mode=enabled?'rewards':raw?.mode==='extreme'?'extreme':'pending';
+  const cap=Number(raw?.capCents),enabled=raw?.mode==='rewards'&&raw?.rewardsEnabled===true&&[500,1000,2000].includes(cap)&&typeof raw?.turnstileSiteKey==='string'&&raw.turnstileSiteKey.trim().length>0;
+  const mode=enabled?'rewards':raw?.mode==='extreme'&&raw?.rewardsEnabled===true&&cap===0?'extreme':'pending';
   current=Object.freeze({mode,rewardsEnabled:enabled,capCents:enabled?cap:0,policyVersion:typeof raw?.policyVersion==='string'?raw.policyVersion:'',turnstileSiteKey:typeof raw?.turnstileSiteKey==='string'?raw.turnstileSiteKey:'',tiers:tierDefinitions.map(t=>({...t,available:enabled&&t.valueCents<=cap}))});
   description.replaceChildren();home.dataset.gameMode=mode;
-  if(enabled){heading.textContent='Mode récompenses';paragraph('Une carte-cadeau pouvant atteindre '+cap/100+' $ est proposée pour cette partie, après validation du score et de votre admissibilité.');const tiers=document.createElement('div');tiers.className='boreal-reward-tiers';for(const t of current.tiers){const span=document.createElement('span'),strong=document.createElement('strong'),small=document.createElement('small');strong.textContent=t.valueCents/100+' $';span.append(strong,document.createTextNode(t.score.toLocaleString('fr-CA')+' pts'));if(!t.available){span.className='unavailable';small.textContent='Non proposé pour cette partie';span.append(small)}tiers.append(span)}description.append(tiers);paragraph('Le plafond sera fixé au départ. Un seul prix par personne tous les 30 jours, vérification SMS après la partie.');}
+  if(enabled){heading.textContent='Mode récompenses';paragraph('Atteins un palier pour obtenir un code à présenter en personne aux Boréalistes. Le personnel te remettra la carte-cadeau après validation du code.');const tiers=document.createElement('div');tiers.className='boreal-reward-tiers';for(const t of current.tiers){const span=document.createElement('span'),strong=document.createElement('strong'),small=document.createElement('small');strong.textContent=t.valueCents/100+' $';span.append(strong,document.createTextNode(t.score.toLocaleString('fr-CA')+' pts'));if(!t.available){span.className='unavailable';small.textContent='Non proposé pour cette partie';span.append(small)}tiers.append(span)}description.append(tiers);paragraph('Une seule récompense : le meilleur palier offert atteint. Maximum annoncé : '+cap/100+' $. Une récompense par personne tous les 30 jours, après vérification SMS.');}
   else if(mode==='extreme'){heading.textContent='Défi extrême — sans carte-cadeau';paragraph('Aucune récompense monétaire dans ce mode. Le rythme est plus rapide et les obstacles plus rapprochés : bats ton record !');}
-  else{heading.textContent='Récompenses en préparation';paragraph('Aucune carte-cadeau n’est attribuée actuellement. Joue librement pour battre ton record.');}
-  if(enabled)paragraph('Réservation valable 30 minutes, pauses comprises ; 15 minutes de jeu effectif maximum. Confirme ton gain par SMS dans les 10 minutes suivant la fin, avant l’expiration de la réservation.');
-  layout();return current;
+  else{heading.textContent='Mode libre — sans récompense';paragraph('Joue sans compte pour battre ton record. Aucune récompense monétaire n’est offerte pour cette partie.');}
+  if(enabled)paragraph('Partie admissible pendant 30 minutes, pauses comprises ; 15 minutes de jeu maximum. Termine la vérification SMS dans les 10 minutes suivant la fin, avant la limite de 30 minutes. Présente ton code confirmé dans les 30 jours.');
+  layout();window.dispatchEvent(new Event('boreal:rewards-status'));return current;
  }
  async function refresh(){const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),5000);try{const response=await fetch('/api/rewards/status',{cache:'no-store',credentials:'same-origin',signal:controller.signal});if(!response.ok)throw new Error('Statut indisponible');return renderStatus(await response.json())}catch{return renderStatus(null)}finally{clearTimeout(timer)}}
  function setBusy(value){busy=!!value;if(start){start.disabled=busy||$('game')?.dataset.ready!=='true';start.setAttribute('aria-busy',String(busy));if(!busy)start.textContent='COMMENCER À JOUER'}layout()}

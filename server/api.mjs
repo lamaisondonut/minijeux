@@ -1,8 +1,9 @@
 import { ENGINE_VERSION, replayGame } from "../v3/game-session-engine.mjs";
 import { verifyAccessIdentity, requireAdmin } from "./auth.mjs";
 import { smsConfiguration, normalizePhone, privateHmac, signChallenge, verifyChallenge, requestVerification, checkVerification } from "./sms.mjs";
-import { ApiError, POLICY_VERSION, TIERS, TTL, secureId, json, iso, originConfigured, csrf, readJson, validId, string, dimensions, ownerCookie, cookie, monthWindow, scoreValue, rewardView, torontoDay } from "./common.mjs";
+import { ApiError, POLICY_VERSION, TIERS, TTL, secureId, json, iso, originConfigured, csrf, readJson, validId, string, dimensions, ownerCookie, cookie, monthWindow, scoreValue, publicRewardView, rewardView, torontoDay } from "./common.mjs";
 import { stmt, cleanup, rateLimit, startSession, award, reserveSmsQuota, reserveSmsSend } from "./store.mjs";
+import { setupDiagnostics, rewardDatabaseReady } from "./setup.mjs";
 function ready(env) {
   return !!(Number.isInteger(Number(env.SMS_DAILY_LIMIT)) && Number(env.SMS_DAILY_LIMIT) >= 1 && Number(env.SMS_DAILY_LIMIT) <= 100 && env.DB && originConfigured(env) && typeof env.REWARDS_HMAC_SECRET === "string" && env.REWARDS_HMAC_SECRET.length >= 32 && typeof env.TURNSTILE_SECRET === "string" && env.TURNSTILE_SECRET.length >= 10 && typeof env.TURNSTILE_SITE_KEY === "string" && env.TURNSTILE_SITE_KEY.length >= 5 && smsConfiguration(env).enabled);
 }
@@ -27,7 +28,7 @@ async function verifyTurnstile(request, env, token) {
   if (typeof token !== "string" || token.length < 1 || token.length > 4096) throw new ApiError(400, "turnstile_required", "Veuillez terminer la v\xE9rification.");
   let result;
   try {
-    const response = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", { method: "POST", body: new URLSearchParams({ secret: env.TURNSTILE_SECRET, response: token, remoteip: request.headers.get("CF-Connecting-IP") || "" }), signal: AbortSignal.timeout(8e3) });
+    const response = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", { method: "POST", redirect: "manual", body: new URLSearchParams({ secret: env.TURNSTILE_SECRET, response: token, remoteip: request.headers.get("CF-Connecting-IP") || "" }), signal: AbortSignal.timeout(8e3) });
     if (!response.ok) throw Error("down");
     result = await response.json();
   } catch {
@@ -40,6 +41,7 @@ async function publicStatus(env, now) {
   if (!ready(env)) return json({ mode: "pending", rewardsEnabled: false, tiers: TIERS.map((t) => ({ ...t, available: false })), policyVersion: POLICY_VERSION, turnstileSiteKey: null, reason: "configuration_pending" });
   const w = monthWindow(now);
   try {
+    if (!await rewardDatabaseReady(env.DB)) throw new ApiError(503, "schema_unavailable");
     await cleanup(env.DB, now);
     const budget = await stmt(env.DB, "SELECT * FROM budgets WHERE month=?", w.month).first();
     const remaining = 1e4 - (budget?.used_cents || 0) - (budget?.reserved_cents || 0);
@@ -54,6 +56,7 @@ async function publicStatus(env, now) {
 }
 async function start(request, env, body, now) {
   if (!ready(env)) throw new ApiError(503, "configuration_pending", "Les r\xE9compenses ne sont pas encore activ\xE9es.");
+  if (!await rewardDatabaseReady(env.DB)) throw new ApiError(503, "service_unavailable", "Service temporairement indisponible.");
   dimensions(body.width, body.height);
   if (!["rewards", "extreme"].includes(body.expectedMode)) throw new ApiError(400, "invalid_mode");
   const raw = ownerCookie(request) || secureId(32);
@@ -115,6 +118,7 @@ async function finish(request, env, body, now) {
 }
 async function smsRequest(request, env, body, now) {
   if (!ready(env)) throw new ApiError(503, "configuration_pending");
+  if (!await rewardDatabaseReady(env.DB)) throw new ApiError(503, "service_unavailable", "Service temporairement indisponible.");
   const ownerHash = await owner(request, env);
   const s = await session(env.DB, body.sessionId, ownerHash);
   if (s.state !== "eligible" || s.reservation_active !== 1 || s.expires_at <= now || s.claim_deadline <= now) throw new ApiError(409, "session_not_eligible", "Cette partie ne peut plus confirmer une r\xE9compense.");
@@ -151,6 +155,7 @@ async function smsRequest(request, env, body, now) {
 }
 async function smsVerify(request, env, body, now) {
   if (!ready(env)) throw new ApiError(503, "configuration_pending");
+  if (!await rewardDatabaseReady(env.DB)) throw new ApiError(503, "service_unavailable", "Service temporairement indisponible.");
   const ownerHash = await owner(request, env);
   const phone = normalizePhone(body.phone);
   const phoneHash = await privateHmac(env, "phone", phone);
@@ -162,7 +167,7 @@ async function smsVerify(request, env, body, now) {
   const existing = await stmt(env.DB, "SELECT * FROM rewards WHERE session_id=?", s.id).first();
   if (existing) {
     if (existing.phone_hash !== phoneHash) throw new ApiError(409, "session_consumed");
-    return json({ awarded: true, score: s.score, reward: rewardView(existing, now) });
+    return json({ awarded: true, score: s.score, reward: publicRewardView(existing, now) });
   }
   if (s.state !== "eligible" || !s.reservation_active || s.expires_at <= now || s.claim_deadline <= now) throw new ApiError(409, "session_not_eligible");
   if (s.bound_phone_hash && s.bound_phone_hash !== phoneHash) throw new ApiError(409, "phone_bound");
@@ -187,7 +192,7 @@ async function smsVerify(request, env, body, now) {
   const names = await stmt(env.DB, "SELECT first_name,last_name FROM sessions WHERE id=?", s.id).first();
   if (!names.first_name || !names.last_name) throw new ApiError(409, "profile_missing");
   const result = await award(env.DB, { sessionId: s.id, ownerHash, phoneHash, now: completionNow });
-  return json({ awarded: !!result.reward, score: s.score, ...result.reward ? { reward: rewardView(result.reward, now) } : { reason: result.reason } });
+  return json({ awarded: !!result.reward, score: s.score, ...result.reward ? { reward: publicRewardView(result.reward, completionNow) } : { reason: result.reason } });
 }
 async function adminRate(request, env, employee, path, now) {
   const staff = await privateHmac(env, "staff", employee.sub);
@@ -205,14 +210,20 @@ async function adminApi(request, env, path, body, now, url) {
   }
   const employee = await requireAdmin(request, env);
   now=Date.now();
+  if (path === "/api/admin/setup" && request.method === "GET") {
+    if (employee.role !== "manager") throw new ApiError(403, "manager_required");
+    // Keep this diagnostic usable when another schema table or reward secret
+    // is absent; the manager's verified identity and allowlist remain required.
+    return json(await setupDiagnostics(env, now));
+  }
   await adminRate(request, env, employee, path, now);
   if (path === "/api/admin/me" && request.method === "GET") return json({ employee: { ...employee, subject: employee.sub } });
   if (path === "/api/admin/budget" && request.method === "GET") {
     await cleanup(env.DB, now);
     const { month } = monthWindow(now);
     const b = await stmt(env.DB, "SELECT * FROM budgets WHERE month=?", month).first();
-    const pending = await stmt(env.DB, "SELECT COUNT(*) count FROM rewards WHERE status='pending' AND claim_by>?", now).first();
-    return json({ month, usedCents: b?.used_cents || 0, reservedCents: b?.reserved_cents || 0, remainingCents: 1e4 - (b?.used_cents || 0) - (b?.reserved_cents || 0), pendingCount: pending.count });
+    const counts = await stmt(env.DB, "SELECT COUNT(CASE WHEN status='pending' AND claim_by>? THEN 1 END) pending_count,COUNT(CASE WHEN status IN ('claimed','issued') THEN 1 END) used_count FROM rewards", now).first();
+    return json({ month, budgetCents: 10000, usedCents: b?.used_cents || 0, reservedCents: b?.reserved_cents || 0, remainingCents: 1e4 - (b?.used_cents || 0) - (b?.reserved_cents || 0), pendingCount: counts.pending_count, usedCount: counts.used_count, countScope: "all" });
   }
   if (path === "/api/admin/audit" && request.method === "GET") {
     const rewardId = url.searchParams.get("rewardId");
@@ -315,7 +326,7 @@ async function handleRequest(request, env) {
       if (typeof env.REWARDS_HMAC_SECRET !== "string" || env.REWARDS_HMAC_SECRET.length < 32) throw new ApiError(503, "configuration_pending");
       const ownerHash = await owner(request, env);
       const row = await stmt(env.DB, "SELECT r.* FROM rewards r JOIN sessions s ON s.id=r.session_id WHERE s.owner_hash=? ORDER BY r.confirmed_at DESC LIMIT 1", ownerHash).first();
-      return json({ reward: rewardView(row, now) });
+      return json({ reward: publicRewardView(row, now) });
     }
     if (request.method !== "POST") throw new ApiError(405, "method_not_allowed");
     if (path === "/api/games/start") return await start(request, env, body, now);

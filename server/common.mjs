@@ -116,6 +116,12 @@ function rewardView(r, now = Date.now()) {
   if (!r) return null;
   return { id: r.id, code: r.code, valueCents: r.value_cents, score: r.score, status: r.status === "pending" && r.claim_by <= now ? "expired" : r.status, firstName: r.first_name, lastName: r.last_name, confirmedAt: iso(r.confirmed_at), claimBy: iso(r.claim_by), claimedAt: iso(r.claimed_at), claimedBy: r.claimed_by, claimedByName: r.claimed_by_name, issuedAt: iso(r.issued_at), issuedBy: r.issued_by, issuedByName: r.issued_by_name, cancelledByName: r.cancelled_by_name, lightspeedRef: r.lightspeed_ref, cancelledAt: iso(r.cancelled_at), cancelReason: r.cancel_reason };
 }
+function publicRewardView(r, now = Date.now()) {
+  if (!r) return null;
+  // A player's receipt must not disclose employee identities, internal notes,
+  // or the restaurant's private Lightspeed transaction reference.
+  return { id: r.id, code: r.code, valueCents: r.value_cents, score: r.score, status: r.status === "pending" && r.claim_by <= now ? "expired" : r.status, firstName: r.first_name, lastName: r.last_name, confirmedAt: iso(r.confirmed_at), claimBy: iso(r.claim_by), claimedAt: iso(r.claimed_at), issuedAt: iso(r.issued_at), cancelledAt: iso(r.cancelled_at) };
+}
 export {
   ApiError,
   MAX_BODY,
@@ -131,6 +137,7 @@ export {
   originConfigured,
   ownerCookie,
   readJson,
+  publicRewardView,
   rewardView,
   scoreValue,
   secureId,

@@ -46,7 +46,7 @@ async function loadKeys(issuer, fetchImpl, refresh = false) {
   let response;
   try {
     response = await fetchImpl(`${issuer}/cdn-cgi/access/certs`, {
-      headers: { accept: 'application/json' }, redirect: 'error',
+      headers: { accept: 'application/json' }, redirect: 'manual',
       signal: AbortSignal.timeout(5000),
     });
   } catch {

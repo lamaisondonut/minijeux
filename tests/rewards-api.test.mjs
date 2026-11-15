@@ -128,6 +128,54 @@ test("disabled and missing services remain pending without financial promises", 
   assert.equal(r.status, 503);
   assert.equal(sent, 0);
 });
+test("a missing payout safety trigger closes offers and sessions until the schema is repaired", async () => {
+  const env = environment();
+  env.DB.sqlite.exec("DROP TRIGGER reward_validate");
+  const unavailable = await (await api(env, "/api/rewards/status")).json();
+  assert.equal(unavailable.mode, "pending");
+  assert.equal(unavailable.rewardsEnabled, false);
+  assert.ok(unavailable.tiers.every(t => !t.available));
+  assert.equal(unavailable.remainingCents, undefined);
+  assert.equal((await api(env, "/api/games/start", {width:390,height:844,expectedMode:"rewards",turnstileToken:"token"})).status, 503);
+  assert.equal(env.DB.sqlite.prepare("SELECT COUNT(*) n FROM sessions").get().n, 0);
+  assert.equal(sent, 0);
+  env.DB.sqlite.exec(schema);
+  assert.equal((await (await api(env, "/api/rewards/status")).json()).mode, "rewards");
+});
+
+test("setup checks the actual schema and gates for managers without sending SMS or returning secrets", async () => {
+  const env = environment();
+  assert.equal((await api(env, "/api/admin/setup")).status, 401);
+  const headers = {"Cf-Access-Jwt-Assertion":await jwt()};
+  assert.equal((await api(env, "/api/admin/setup", undefined, headers)).status, 403);
+  env.DB.sqlite.prepare("INSERT INTO employees(sub,email,name,role) VALUES('alice','alice@example.com','Alice','staff')").run();
+  assert.equal((await api(env, "/api/admin/setup", undefined, headers)).status, 403);
+  env.DB.sqlite.prepare("UPDATE employees SET role='manager'").run();
+  let result = await (await api(env, "/api/admin/setup", undefined, headers)).json();
+  assert.equal(result.database.connected, true);
+  assert.equal(result.database.schemaReady, true);
+  assert.equal(result.rewardsConfigured, true);
+  assert.equal(result.providerVerification, "not_performed");
+  const diagnostics = JSON.stringify(result);
+  for (const value of [env.REWARDS_HMAC_SECRET, env.TWILIO_AUTH_TOKEN, env.TWILIO_ACCOUNT_SID, env.TURNSTILE_SECRET]) assert.ok(!diagnostics.includes(value));
+  env.REWARDS_ENABLED = "false";
+  result = await (await api(env, "/api/admin/setup", undefined, headers)).json();
+  assert.equal(result.configuration.rewardsEnabled, false);
+  assert.equal(result.configuration.smsProviderConfigured, true);
+  assert.equal(result.configuration.smsConfigured, false);
+  assert.equal(result.rewardsConfigured, false);
+  assert.equal(env.REWARDS_ENABLED, "false");
+  env.DB.sqlite.exec("DROP TRIGGER reward_validate; DROP TABLE audit; DROP TABLE rate_limits");
+  delete env.REWARDS_HMAC_SECRET;
+  result = await (await api(env, "/api/admin/setup", undefined, headers)).json();
+  assert.equal(result.database.schemaReady, false);
+  assert.deepEqual(result.database.missingTables.sort(), ["audit", "rate_limits"]);
+  assert.deepEqual(result.database.missingTriggers, ["reward_validate"]);
+  assert.equal(sent, 0);
+  assert.equal(checks, 0);
+  env.DB.sqlite.prepare("UPDATE employees SET active=0").run();
+  assert.equal((await api(env, "/api/admin/setup", undefined, headers)).status, 403);
+});
 test("write requests enforce origin, fetch metadata, content type and 128KiB stream limit", async () => {
   const env = environment();
   assert.equal((await api(env, "/api/games/start", {}, { Origin: "https://evil.example" })).status, 403);
@@ -268,6 +316,13 @@ test("Access identity requires verified JWT and admin requires active allowlist;
   assert.equal((await api(env, `/api/admin/rewards/${reward.id}/issue`, { lightspeedRef: "LS-1" }, bob)).status, 409);
   assert.equal((await api(env, `/api/admin/rewards/${reward.id}/issue`, { lightspeedRef: "LS-1" }, headers)).status, 200);
   assert.equal((await api(env, `/api/admin/rewards/${reward.id}/issue`, { lightspeedRef: "LS-1" }, headers)).status, 200);
+  const recovered = await (await api(env, "/api/rewards/confirmation")).json();
+  const verifiedAgain = await (await api(env, "/api/rewards/sms/verify", { challengeId, phone: "+15145551234", code: "123456" })).json();
+  for (const receipt of [recovered.reward, verifiedAgain.reward]) {
+    assert.equal(receipt.status, "issued");
+    assert.equal(receipt.code, reward.code);
+    for (const field of ["claimedBy", "claimedByName", "issuedBy", "issuedByName", "lightspeedRef", "cancelReason", "cancelledByName"]) assert.equal(Object.hasOwn(receipt, field), false);
+  }
   const audit = await (await api(env, `/api/admin/audit?rewardId=${reward.id}`, void 0, headers)).json();
   assert.ok(audit.audit.some((a) => a.actorName === "Alice No\xEBl" && a.action === "issued"));
   const csvResponse = await api(env, "/api/admin/export", void 0, headers);
@@ -291,6 +346,10 @@ test("cancellation never refunds budget or resets the rolling 30-day phone rule;
   const confirmedAt = now;
   const headers = { "Cf-Access-Jwt-Assertion": await jwt() };
   assert.equal((await api(env, `/api/admin/rewards/${reward.id}/cancel`, { reason: "Erreur confirmée en magasin" }, headers)).status, 200);
+  const receipt = (await (await api(env, "/api/rewards/confirmation")).json()).reward;
+  assert.equal(receipt.status, "cancelled");
+  assert.equal(Object.hasOwn(receipt, "cancelReason"), false);
+  assert.equal(Object.hasOwn(receipt, "cancelledByName"), false);
   assert.equal(env.DB.sqlite.prepare("SELECT used_cents FROM budgets WHERE month='2026-11'").get().used_cents, 2000);
   assert.equal((await api(env, `/api/admin/rewards/${reward.id}/claim`, {}, headers)).status, 409);
   now = confirmedAt + 30 * 86400000 - 1;
@@ -346,6 +405,41 @@ test("confirmed score remains visible in the register, CSV and recovery after ne
   assert.equal(recovered.reward.score,7500);
   const denied=await api(env,"/api/rewards/confirmation",undefined,{Cookie:`__Host-rewards-owner=${"x".repeat(43)}`});
   assert.equal((await denied.json()).reward,null);
+});
+
+test("admin shows current Toronto month money and real cross-month code counts and latest winners", async () => {
+  const env = environment();
+  env.DB.sqlite.prepare("INSERT INTO employees(sub,email,name,role) VALUES('alice','alice@example.com','Alice Responsable','manager')").run();
+  let phoneSequence = 0;
+  async function confirm(at, status = "pending") {
+    now = Date.parse(at);
+    const run = await ownedGame(env);
+    const phoneHash = await privateHmac(env, "phone", `+1514555${String(++phoneSequence).padStart(4, "0")}`);
+    env.DB.sqlite.prepare("UPDATE sessions SET state='eligible',score=10000,claim_deadline=?,bound_phone_hash=?,first_name='Camille',last_name=? WHERE id=?").run(now+600000, phoneHash, `Gagnant ${phoneSequence}`, run.id);
+    const { reward } = await award(env.DB, {sessionId:run.id,ownerHash:run.owner_hash,phoneHash,now});
+    const headers = {"Cf-Access-Jwt-Assertion":await jwt()};
+    if (["claimed", "issued"].includes(status)) assert.equal((await api(env, `/api/admin/rewards/${reward.id}/claim`, {}, headers)).status, 200);
+    if (status === "issued") assert.equal((await api(env, `/api/admin/rewards/${reward.id}/issue`, {lightspeedRef:"LS-ancien"}, headers)).status, 200);
+    if (status === "cancelled") assert.equal((await api(env, `/api/admin/rewards/${reward.id}/cancel`, {reason:"Annulation confirmée"}, headers)).status, 200);
+    return reward;
+  }
+  await confirm("2026-10-01T16:00:00Z"); // Expired, never counted as used.
+  await confirm("2026-10-30T16:00:00Z", "issued");
+  await confirm("2026-10-31T16:00:00Z"); // Still redeemable in November.
+  await confirm("2026-11-01T16:00:00Z", "cancelled");
+  const claimed = await confirm("2026-11-14T16:00:00Z", "claimed");
+  const latest = await confirm("2026-11-15T16:00:00Z");
+  const headers = {"Cf-Access-Jwt-Assertion":await jwt()};
+  const budget = await (await api(env, "/api/admin/budget", undefined, headers)).json();
+  assert.deepEqual(budget, {month:"2026-11",budgetCents:10000,usedCents:6000,reservedCents:0,remainingCents:4000,pendingCount:2,usedCount:2,countScope:"all"});
+  const list = await (await api(env, "/api/admin/rewards", undefined, headers)).json();
+  assert.equal(list.rewards.length, 6);
+  assert.equal(list.rewards[0].id, latest.id);
+  assert.equal(list.rewards[0].lastName, "Gagnant 6");
+  assert.equal(list.rewards[1].id, claimed.id);
+  const guest = await api(env, "/api/admin/budget");
+  assert.equal(guest.status, 401);
+  assert.equal((await guest.json()).usedCents, undefined);
 });
 
 test("the first SMS keeps its reserved place when other sends saturate the quota", async () => {

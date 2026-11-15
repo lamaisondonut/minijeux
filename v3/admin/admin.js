@@ -3,8 +3,8 @@
 (() => {
   const $ = (id) => document.getElementById(id);
   const money = new Intl.NumberFormat('fr-CA', { style: 'currency', currency: 'CAD' });
-  const dateTime = new Intl.DateTimeFormat('fr-CA', { dateStyle: 'medium', timeStyle: 'short' });
-  const dateOnly = new Intl.DateTimeFormat('fr-CA', { dateStyle: 'medium' });
+  const dateTime = new Intl.DateTimeFormat('fr-CA', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'America/Toronto' });
+  const dateOnly = new Intl.DateTimeFormat('fr-CA', { dateStyle: 'medium', timeZone: 'America/Toronto' });
   const labels = { pending: 'À utiliser', claimed: 'En cours de remise', issued: 'Carte remise', expired: 'Code expiré', cancelled: 'Annulé' };
   const state = { employee: null, rewards: [], selected: null, cursor: null, listRequest: 0, auditRequest: 0, session: 0, busy: false, listBusy: false };
 
@@ -34,6 +34,16 @@
     $('notification').hidden = false;
   }
   function clearNotice() { $('notification').hidden = true; $('notification').textContent = ''; }
+  function serviceError(status, code) {
+    if (status === 429) return 'Trop de tentatives. Patientez un moment avant de réessayer.';
+    const messages = {
+      reward_not_found: 'CODE INTROUVABLE. Vérifiez le code présenté par le client.',
+      reward_conflict: 'Ce code a déjà été utilisé, est expiré ou a changé de statut. Actualisez sa fiche.',
+      invalid_lightspeed_ref: 'Vérifiez la référence de la carte Lightspeed.',
+      export_too_large: 'Choisissez un statut avant d’exporter les récompenses.'
+    };
+    return Object.hasOwn(messages, code) ? messages[code] : 'Le service est temporairement indisponible. Réessayez dans un instant.';
+  }
 
   async function api(path, options = {}) {
     let response;
@@ -44,7 +54,7 @@
         headers: { Accept: 'application/json', ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...options.headers }
       });
     } catch (_) {
-      throw new ApiError('Connexion au serveur interrompue. Actualisez le registre pour vérifier le statut avant toute remise.');
+      throw new ApiError('Connexion interrompue. Actualisez le registre pour vérifier le statut avant toute remise.');
     }
     if (response.status === 401 || response.status === 403) {
       showAccess(response.status);
@@ -52,8 +62,8 @@
     }
     let data;
     try { data = await response.json(); }
-    catch (_) { throw new ApiError('La réponse du serveur est illisible. Réessayez après avoir vérifié votre connexion.', response.status); }
-    if (!response.ok) throw new ApiError(typeof data.message === 'string' ? data.message : 'Le serveur ne peut pas traiter cette demande. Réessayez.', response.status, data.error);
+    catch (_) { throw new ApiError('La connexion n’a pas pu être confirmée. Réessayez dans un instant.', response.status); }
+    if (!response.ok) throw new ApiError(serviceError(response.status, data.error), response.status, data.error);
     return data;
   }
 
@@ -83,7 +93,7 @@
     $('access-retry').hidden = status === 401;
     if (status === 401) {
       $('access-title').textContent = 'Connectez-vous à votre compte';
-      $('access-message').textContent = 'Votre session est absente ou a expiré. La connexion sécurisée Cloudflare Access utilise votre compte individuel.';
+      $('access-message').textContent = 'Votre session est absente ou a expiré. Connectez-vous avec votre compte individuel.';
     } else if (status === 403) {
       $('access-title').textContent = 'Accès employé requis';
       $('access-message').textContent = 'Votre compte est connecté, mais il ne figure pas parmi les employés autorisés. Contactez votre responsable pour faire vérifier votre accès.';
@@ -97,7 +107,7 @@
         }).catch(() => {});
     } else {
       $('access-title').textContent = 'Connexion momentanément indisponible';
-      $('access-message').textContent = message || 'Le serveur ne répond pas. Aucune récompense ne peut être traitée pour le moment.';
+      $('access-message').textContent = message || 'Le service ne répond pas. Aucune récompense ne peut être traitée pour le moment.';
     }
   }
 
@@ -111,7 +121,7 @@
     try {
       const data = await api('/me');
       if (session !== state.session) return;
-      if (!data.employee || !(data.employee.sub || data.employee.subject)) throw new ApiError('Le compte employé reçu est incomplet. Contactez votre responsable.');
+      if (!data.employee || !(data.employee.sub || data.employee.subject)) throw new ApiError('Votre compte doit être vérifié par votre responsable.');
       state.employee = data.employee;
       $('employee-name').textContent = data.employee.name || data.employee.email || 'Compte employé';
       $('access-panel').hidden = true;
@@ -128,17 +138,21 @@
     try {
       const data = await api('/budget');
       if (session !== state.session || !state.employee) return;
+      $('budget-total').textContent = amount(data.budgetCents);
       $('budget-remaining').textContent = amount(data.remainingCents);
       $('budget-used').textContent = amount(data.usedCents);
-      $('budget-reserved').textContent = amount(data.reservedCents);
+      $('budget-reserved').textContent = amount(data.reservedCents) + ' retenus pour les parties en cours. ';
+      $('budget-reserved').hidden = !Number.isSafeInteger(data.reservedCents) || data.reservedCents <= 0;
       $('budget-pending').textContent = Number.isSafeInteger(data.pendingCount) ? String(data.pendingCount) : '—';
+      $('budget-used-count').textContent = Number.isSafeInteger(data.usedCount) ? String(data.usedCount) : '—';
       if (typeof data.month === 'string' && /^\d{4}-\d{2}$/.test(data.month)) {
         const month = new Date(data.month + '-15T12:00:00Z');
         $('budget-month').textContent = new Intl.DateTimeFormat('fr-CA', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(month);
       } else $('budget-month').textContent = 'Mois en cours';
     } catch (error) {
       if (session !== state.session) return;
-      for (const id of ['budget-remaining', 'budget-used', 'budget-reserved', 'budget-pending']) $(id).textContent = '—';
+      for (const id of ['budget-total', 'budget-remaining', 'budget-used', 'budget-pending', 'budget-used-count']) $(id).textContent = '—';
+      $('budget-reserved').hidden = true;
       $('budget-month').textContent = 'Données indisponibles';
       $('budget-error').textContent = 'Le budget n’a pas pu être chargé. Utilisez « Actualiser » pour réessayer.';
       $('budget-error').hidden = false;
@@ -170,26 +184,28 @@
     const request = ++state.listRequest;
     const session = state.session;
     const query = new URLSearchParams();
-    const code = $('code-search').value.trim();
+    const code = $('code-search').value.trim().toUpperCase();
     const status = $('status-filter').value;
     if (code) query.set('code', code);
-    if (status) query.set('status', status);
+    if (status && !code) query.set('status', status);
     if (append && state.cursor) query.set('cursor', state.cursor);
     setListBusy(true);
     if (!append) {
       $('reward-list').replaceChildren();
       $('result-count').textContent = 'Chargement des récompenses…';
-      listState('Chargement du registre', 'Les données sont récupérées auprès du serveur.');
+      listState('Chargement des gagnants', 'Un instant, s’il vous plaît.');
     }
     $('load-more').hidden = true;
     try {
       const data = await api('/rewards' + (query.size ? '?' + query.toString() : ''));
       if (request !== state.listRequest || session !== state.session || !state.employee) return;
-      if (!Array.isArray(data.rewards)) throw new ApiError('Le registre reçu est incomplet. Réessayez.');
+      if (!Array.isArray(data.rewards)) throw new ApiError('Les récompenses n’ont pas pu être chargées. Réessayez.');
       state.rewards = append ? [...state.rewards, ...data.rewards.filter((reward) => !state.rewards.some((item) => item.id === reward.id))] : data.rewards;
       state.cursor = data.nextCursor || null;
       renderRewards();
-      if (state.selected) {
+      if (code && state.rewards.length === 1) {
+        selectReward(state.rewards[0]);
+      } else if (state.selected) {
         const updated = state.rewards.find((reward) => reward.id === state.selected.id);
         if (updated) { state.selected = updated; renderDetail(); }
       }
@@ -199,6 +215,16 @@
       if (!append) state.rewards = [];
       listState('Le registre n’a pas pu être chargé', error.message, true);
     } finally { if (request === state.listRequest && session === state.session) setListBusy(false); }
+  }
+
+  function selectReward(reward) {
+    if (state.busy) return;
+    state.selected = reward;
+    clearNotice();
+    renderRewards();
+    renderDetail();
+    loadAudit();
+    if (matchMedia('(max-width: 850px)').matches) $('detail-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
   function renderRewards() {
@@ -212,20 +238,14 @@
       const customer = node('span', 'row-customer');
       customer.append(node('span', 'customer-name', name(reward)), node('span', 'row-code', reward.code));
       row.append(customer, node('span', 'row-value', amount(reward.valueCents)), badge(reward.status));
-      row.addEventListener('click', () => {
-        if (state.busy) return;
-        state.selected = reward;
-        clearNotice();
-        renderRewards();
-        renderDetail();
-        loadAudit();
-        if (matchMedia('(max-width: 850px)').matches) $('detail-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
-      });
+      row.addEventListener('click', () => selectReward(reward));
       list.append(row);
     }
     $('result-count').textContent = state.rewards.length + (state.rewards.length > 1 ? ' récompenses affichées' : ' récompense affichée');
     $('list-state').hidden = state.rewards.length > 0;
-    if (!state.rewards.length) listState('Aucune récompense trouvée', 'Vérifiez le code saisi ou essayez un autre statut.');
+    const searching = Boolean($('code-search').value.trim());
+    $('registry-title').textContent = searching ? 'Résultat de la recherche' : $('status-filter').value ? 'Récompenses par statut' : 'Derniers gagnants';
+    if (!state.rewards.length) listState(searching ? 'CODE INTROUVABLE' : 'Aucune récompense trouvée', searching ? 'Vérifiez le code présenté par le client.' : 'Aucun gagnant à afficher pour le moment.');
     $('load-more').hidden = !state.cursor;
   }
 
@@ -245,8 +265,10 @@
     $('detail-name').textContent = name(reward);
     $('detail-code').textContent = reward.code || 'Code indisponible';
     $('detail-value').textContent = amount(reward.valueCents);
+    $('detail-validation').textContent = reward.status === 'claimed' || reward.status === 'issued' ? 'CODE DÉJÀ UTILISÉ' : reward.status === 'expired' ? 'CODE EXPIRÉ' : '';
+    $('detail-validation').hidden = !$('detail-validation').textContent;
     $('detail-facts').replaceChildren();
-    fact('Participation confirmée', date(reward.confirmedAt));
+    fact('Date d’attribution', date(reward.confirmedAt));
     if (reward.score !== undefined) fact('Score', Number.isSafeInteger(reward.score) ? reward.score.toLocaleString('fr-CA') : 'Non renseigné');
     fact('Code utilisable jusqu’au', date(claimDeadline(reward)));
     if (reward.claimedAt) fact('Code utilisé le', date(reward.claimedAt));
@@ -263,13 +285,13 @@
     if (!reward) return;
     const block = node('div', 'action-block');
     if (reward.status === 'pending') {
-      block.append(node('h3', '', '1. Valider l’utilisation du code'), node('p', '', 'Vérifiez le montant avec le client. La carte doit être créée dans Lightspeed après la confirmation du serveur.'));
-      const button = node('button', 'button primary', 'Marquer comme utilisé');
+      block.append(node('h3', '', '1. Utiliser le code'), node('p', '', 'Vérifiez le montant avec le client, puis confirmez. Attendez la confirmation avant de créer sa carte dans Lightspeed.'));
+      const button = node('button', 'button primary', 'MARQUER COMME UTILISÉ');
       button.id = 'claim-button'; button.type = 'button'; button.disabled = state.busy;
       button.addEventListener('click', openClaimDialog);
       block.append(button);
     } else if (reward.status === 'claimed' && ownClaim(reward)) {
-      block.append(node('h3', '', '2. Créer et remettre la carte'), node('p', '', 'Ce code est verrouillé à votre nom. Vérifiez d’abord si une carte a déjà été créée, puis créez manuellement une seule carte dans Lightspeed au montant indiqué.'));
+      block.append(node('h3', '', '2. Créer et remettre la carte'), node('p', '', 'Vous avez utilisé ce code. Vérifiez d’abord si une carte a déjà été créée, puis créez manuellement une seule carte dans Lightspeed au montant indiqué.'));
       const form = node('form'); form.id = 'issue-form';
       const field = node('div', 'field');
       const label = node('label', '', 'Référence de la carte Lightspeed'); label.htmlFor = 'lightspeed-ref';
@@ -284,7 +306,7 @@
       form.addEventListener('submit', confirmIssue);
       block.append(form);
     } else if (reward.status === 'claimed') {
-      block.append(node('h3', '', 'Remise déjà prise en charge'), node('p', '', 'Ce code est verrouillé par un autre employé. Ne créez pas de carte supplémentaire. L’employé qui a utilisé le code doit terminer la remise avec son compte.'));
+      block.append(node('h3', '', 'Remise déjà prise en charge'), node('p', '', 'Un autre employé a utilisé ce code et doit terminer la remise avec son compte. Ne créez pas de carte supplémentaire.'));
     } else if (reward.status === 'issued') {
       block.append(node('h3', '', 'Carte remise et enregistrée'), node('p', '', 'Cette récompense a déjà été utilisée. Aucune autre carte ne doit être créée pour ce code.'));
     } else if (reward.status === 'expired') {
@@ -292,7 +314,7 @@
     } else if (reward.status === 'cancelled') {
       block.append(node('h3', '', 'Récompense annulée'), node('p', '', reward.cancelReason || 'Cette récompense ne peut pas être utilisée.'));
     } else {
-      block.append(node('h3', '', 'Vérification nécessaire'), node('p', '', 'Le statut reçu ne permet pas de traiter cette récompense. Actualisez le registre et contactez votre responsable.'));
+      block.append(node('h3', '', 'Vérification nécessaire'), node('p', '', 'Cette récompense nécessite une vérification. Actualisez le registre et contactez votre responsable.'));
     }
     container.append(block);
   }
@@ -334,7 +356,7 @@
   }
 
   function updateReward(reward) {
-    if (!reward || !reward.id) throw new ApiError('Confirmation serveur incomplète. Actualisez la fiche avant toute remise.');
+    if (!reward || !reward.id) throw new ApiError('L’opération n’a pas pu être confirmée. Actualisez la fiche avant toute remise.');
     state.selected = reward;
     const index = state.rewards.findIndex((item) => item.id === reward.id);
     if (index >= 0) state.rewards[index] = reward;
@@ -367,7 +389,7 @@
       const data = await api('/rewards/' + encodeURIComponent(reward.id) + '/claim', { method: 'POST', body: '{}' });
       if (session !== state.session || !state.employee) return;
       const updated = data.reward || data;
-      if (updated.status !== 'claimed' || !ownClaim(updated)) throw new ApiError('Le serveur n’a pas confirmé le verrouillage à votre nom. Actualisez la fiche avant toute remise.');
+      if (updated.status !== 'claimed' || !ownClaim(updated)) throw new ApiError('L’utilisation à votre nom n’a pas été confirmée. Actualisez la fiche avant toute remise.');
       if (updated.id !== reward.id) throw new ApiError('La confirmation ne correspond pas au code choisi. Actualisez la fiche avant toute remise.');
       updateReward(updated);
       $('claim-dialog').close();
@@ -408,7 +430,7 @@
       const data = await api('/rewards/' + encodeURIComponent(reward.id) + '/issue', { method: 'POST', body: JSON.stringify({ lightspeedRef: reference }) });
       if (session !== state.session || !state.employee) return;
       const updated = data.reward || data;
-      if (updated.status !== 'issued') throw new ApiError('Le serveur n’a pas confirmé l’enregistrement. Vérifiez le statut avant toute nouvelle action.');
+      if (updated.status !== 'issued') throw new ApiError('La remise n’a pas été confirmée. Vérifiez le statut avant toute nouvelle action.');
       if (updated.id !== reward.id) throw new ApiError('La confirmation ne correspond pas au code choisi. Actualisez la fiche avant toute nouvelle action.');
       updateReward(updated);
       showNotice('La remise de la carte-cadeau est enregistrée. Ce code ne peut plus être utilisé.');
@@ -444,11 +466,11 @@
       const response = await fetch('/api/admin/export' + (query.size ? '?' + query.toString() : ''), { credentials: 'same-origin', cache: 'no-store', headers: { Accept: 'text/csv' } });
       if (response.status === 401 || response.status === 403) { showAccess(response.status); return; }
       if (!response.ok) {
-        let message = 'L’export n’a pas pu être préparé. Réessayez.';
-        try { const data = await response.json(); if (typeof data.message === 'string') message = data.message; } catch (_) {}
+        let message = serviceError(response.status);
+        try { const data = await response.json(); message = serviceError(response.status, data.error); } catch (_) {}
         throw new ApiError(message);
       }
-      if (!(response.headers.get('content-type') || '').toLowerCase().includes('text/csv')) throw new ApiError('Le serveur n’a pas renvoyé de fichier CSV. Vérifiez votre session.');
+      if (!(response.headers.get('content-type') || '').toLowerCase().includes('text/csv')) throw new ApiError('Le fichier n’a pas pu être préparé. Vérifiez votre connexion.');
       const blob = await response.blob();
       if (session !== state.session || !state.employee) return;
       objectUrl = URL.createObjectURL(blob);
@@ -464,8 +486,22 @@
   }
 
   $('access-retry').addEventListener('click', boot);
-  $('search-form').addEventListener('submit', (event) => { event.preventDefault(); if (!state.busy) { clearNotice(); loadRewards(); } });
-  $('status-filter').addEventListener('change', () => { if (!state.busy) loadRewards(); });
+  $('search-form').addEventListener('submit', (event) => {
+    event.preventDefault();
+    if (!state.busy) {
+      clearNotice();
+      state.selected = null; state.auditRequest += 1; renderDetail();
+      if ($('code-search').value.trim()) $('status-filter').value = '';
+      loadRewards();
+    }
+  });
+  $('status-filter').addEventListener('change', () => {
+    if (!state.busy) {
+      $('code-search').value = '';
+      state.selected = null; state.auditRequest += 1; renderDetail();
+      loadRewards();
+    }
+  });
   $('refresh-button').addEventListener('click', () => { if (!state.busy) { clearNotice(); const selected = state.selected; Promise.allSettled([loadRewards(), loadBudget(), refreshSelected(selected)]); } });
   $('load-more').addEventListener('click', () => loadRewards(true));
   $('export-button').addEventListener('click', exportCsv);

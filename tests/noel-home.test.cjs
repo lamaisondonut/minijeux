@@ -102,6 +102,10 @@ const canvasHash=page=>page.evaluate(async()=>{
    page.on('request',request=>{if(!request.url().startsWith(origin)&&!request.url().startsWith('data:'))external.push(request.url())});
    await page.route('**/v3/__home_test__.html',route=>route.fulfill({contentType:'text/html',body:instrument(html)}));
    await page.goto(origin+'/v3/__home_test__.html');await ready(page);await page.waitForTimeout(150);
+   check(await page.locator('#home img').count()===0,`aucun logo dans le menu ${viewport.width}×${viewport.height}`);
+   check(await page.locator('.boreal-credit').innerText()==='Un jeu imaginé et développé par GOAT Agence',`signature textuelle conservée ${viewport.width}×${viewport.height}`);
+   check(await page.locator('#home .tips').isVisible()&&await page.locator('#home .tip').count()===3,`indications de jeu visibles ${viewport.width}×${viewport.height}`);
+   check((await page.locator('.boreal-reward-info').innerText()).includes('Mode libre — sans récompense'),`mode libre annoncé sans promesse ${viewport.width}×${viewport.height}`);
    await page.evaluate(()=>noelHomeTest.drawHero());
    const hero=await page.evaluate(()=>window.__homeHeroDraws.at(-1));
    const title=await page.locator('#home h1').boundingBox(),start=await page.locator('#start').boundingBox(),how=await page.locator('#how').boundingBox(),reward=await page.locator('.boreal-reward-info').boundingBox();

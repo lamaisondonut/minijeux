@@ -1,21 +1,25 @@
 # Remettre une récompense de Noël
 
-Cette procédure concerne les employés autorisés des Boréalistes et de GOAT. L’espace `/admin/` affiche le registre, le budget interne et l’historique des opérations. Il ne crée pas de carte-cadeau dans Lightspeed.
+Cette procédure concerne les employés autorisés des Boréalistes. Enregistrer la page `/admin/` dans les favoris du téléphone, de la tablette ou de l’ordinateur utilisé au service. Elle affiche les vrais gagnants, le budget interne et l’historique des remises. Les cartes-cadeaux sont créées manuellement dans Lightspeed.
 
 ## Se connecter
 
-1. Ouvrir `/admin/` et se connecter avec son compte individuel Cloudflare Access.
-2. Vérifier son nom dans le haut de la page. Chaque employé doit être autorisé dans la liste du serveur : une connexion réussie à Cloudflare Access ne suffit pas à accorder l’accès au registre.
+1. Ouvrir `/admin/` et se connecter avec son compte individuel.
+2. Vérifier son nom dans le haut de la page. Le compte doit avoir été autorisé par le responsable.
 3. Si « Accès employé requis » apparaît, transmettre au responsable le compte et l’identifiant affichés. Ne pas emprunter le compte d’un collègue.
 
 ## 1. Vérifier le code et le marquer comme utilisé
 
-1. Demander au client son code de récompense et le rechercher dans le registre. Choisir « Tous les statuts » pour retrouver un code déjà utilisé.
-2. Ouvrir la fiche. Vérifier avec le client son nom, la valeur de la récompense et la date limite d’utilisation du code.
-3. Pour un code « À utiliser », cliquer sur **Marquer comme utilisé**. La fenêtre de confirmation rappelle le client, le code, le montant et l’employé responsable.
-4. Confirmer, puis **attendre la réponse du serveur**. Créer une carte seulement lorsque la fiche affiche **En cours de remise** et indique que le code est verrouillé à son propre nom.
+1. Demander au client son code de récompense et le rechercher. Sa fiche s’ouvre automatiquement, même si un autre statut était sélectionné.
+2. Vérifier avec le client son nom, la valeur de la récompense, la date d’attribution et la date limite d’utilisation du code.
+3. Pour un code « À utiliser », cliquer sur **MARQUER COMME UTILISÉ**. La fenêtre de confirmation rappelle le client, le code, le montant et l’employé responsable.
+4. Confirmer, puis **attendre la confirmation**. Créer une carte seulement lorsque la fiche affiche **En cours de remise** et identifie son compte comme employé responsable.
 
-Le serveur autorise une seule utilisation du code. Si deux employés essaient en même temps, un seul peut réussir. L’autre reçoit une erreur et doit relire la fiche actualisée. Un clic ou une animation de chargement ne constitue jamais une confirmation.
+Une seule utilisation du code est possible. Si deux employés essaient en même temps, un seul peut réussir. L’autre reçoit une erreur et doit relire la fiche actualisée. Un clic ou une animation de chargement ne constitue jamais une confirmation.
+
+- **CODE INTROUVABLE :** vérifier le code présenté par le client. Aucune carte à créer.
+- **CODE DÉJÀ UTILISÉ :** ne pas créer une autre carte. Si la fiche indique « En cours de remise », l’employé responsable doit reprendre la remise avec son compte.
+- **CODE EXPIRÉ :** la date limite est dépassée. Aucune carte à créer.
 
 ## 2. Créer et remettre une seule carte dans Lightspeed
 
@@ -55,7 +59,9 @@ La limite de **30 jours** concerne l’utilisation du **code de récompense** à
 
 ## Budget, export et fin de service
 
-Le budget est un outil interne. Le montant disponible, les récompenses attribuées, le montant réservé et le nombre de codes à utiliser viennent du serveur. Si les chiffres ne se chargent pas, utiliser **Actualiser**.
+L’accueil présente le budget du mois de **100 $ CAD**, le montant attribué, le budget restant et les derniers gagnants. Le budget suit le mois civil au Québec, sans report. Les montants retenus pour des parties en cours sont indiqués sous les chiffres. Les gains expirés ou utilisés ne rétablissent pas le budget.
+
+Les **codes à réclamer** comprennent tous les codes encore valides, y compris ceux attribués le mois précédent. Les **codes utilisés — total** comprennent tous les codes déjà utilisés, que la remise de la carte soit en cours ou terminée. Ces deux nombres couvrent tous les mois ; les montants du budget concernent uniquement le mois affiché. Les chiffres et les gagnants viennent du registre réel. Si les chiffres ne se chargent pas, utiliser **Actualiser**.
 
 L’export CSV contient des données clients : le conserver uniquement dans un espace de travail autorisé et appliquer les règles internes de conservation. Ne pas le transmettre par un canal personnel.
 

@@ -36,11 +36,14 @@ worker.stdout.on('data',chunk=>{output+=chunk});worker.stderr.on('data',chunk=>{
   assert.match(response.headers.get('cache-control'),/no-store/);
   const status=await response.json();assert.equal(status.mode,'pending');assert.equal(status.rewardsEnabled,false);
   assert.ok(!/budget|remainingCents|usedCents|phone|employee/i.test(JSON.stringify(status)));
-  for(const pathname of ['/admin','/admin/','/admin/index.html','/admin%2Findex.html','/api/admin/me','/api/admin/rewards','/api/admin/export']){
+  for(const pathname of ['/admin','/admin/','/admin/index.html','/admin%2Findex.html','/api/admin/me','/api/admin/rewards','/api/admin/export','/api/admin/setup']){
    response=await fetch(origin+pathname,{redirect:'manual',headers:{'Cf-Access-Authenticated-User-Email':'forged@example.test'}});
    assert.ok([401,403,503].includes(response.status),`${pathname}: ${response.status}`);
    assert.match(response.headers.get('cache-control'),/no-store/);
-   assert.ok(!(await response.text()).includes('<html'),`${pathname}: no protected HTML leaked`);
+   const denied=await response.text();
+   assert.ok(!denied.includes('id="admin-content"')&&!denied.includes('/admin/admin.js'),`${pathname}: no private registry or application script leaked`);
+   if(pathname.startsWith('/api/'))assert.ok(!denied.includes('<html'),`${pathname}: private API remains JSON`);
+   else assert.match(denied,/ESPACE EMPLOYÉS/);
   }
   response=await fetch(origin+'/api/games/start',{method:'POST',headers:{origin,'content-type':'application/json'},body:JSON.stringify({width:390,height:844,expectedMode:'rewards'})});
   assert.equal(response.status,503);
@@ -51,10 +54,12 @@ worker.stdout.on('data',chunk=>{output+=chunk});worker.stderr.on('data',chunk=>{
   await page.goto(origin+'/',{waitUntil:'networkidle'});
   await page.waitForFunction(()=>window.BorealRewards&&document.querySelector('#game').dataset.ready==='true');
   assert.equal(await page.locator('#home').getAttribute('data-game-mode'),'pending');
-  assert.equal(await page.locator('.boreal-brand-logo').evaluate(img=>img.naturalWidth),320);
+  assert.equal(await page.locator('#home img').count(),0);
+  assert.match(await page.locator('.boreal-credit').innerText(),/Un jeu imaginé et développé par GOAT Agence/);
+  assert.ok(!(await page.locator('#home').innerText()).includes('Récompenses en préparation'));
   await page.locator('#start').click();
   await page.waitForFunction(()=>document.querySelector('#home').classList.contains('off'));
-  assert.match(await page.locator('#rewardStartNote').innerText(),/aucune récompense monétaire/);
+  assert.match(await page.locator('#rewardStartNote').innerText(),/Mode libre.*sans récompense/);
   assert.deepEqual(errors,[]);
   console.log('PASS: real Pages worker + D1 migration, private routes fail closed, pending status, browser practice play');
  } finally {

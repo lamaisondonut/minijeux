@@ -18,6 +18,10 @@ export function smsConfiguration(env) {
   if (env.REWARDS_ENABLED !== 'true') return { enabled: false, reason: 'rewards_disabled' };
   if (env.SMS_APPROVED !== 'true') return { enabled: false, reason: 'sms_not_approved' };
   if (env.TERMS_APPROVED !== 'true') return { enabled: false, reason: 'terms_not_approved' };
+  return smsProviderConfiguration(env);
+}
+
+export function smsProviderConfiguration(env) {
   if (env.SMS_PROVIDER !== 'twilio') return { enabled: false, reason: 'sms_not_configured' };
   if (typeof env.SMS_DAILY_LIMIT !== 'string' || !/^(?:[1-9]|[1-9][0-9]|100)$/.test(env.SMS_DAILY_LIMIT)) {
     return { enabled: false, reason: 'sms_not_configured' };
@@ -106,7 +110,7 @@ async function providerCall(env, resource, params, fetchImpl) {
   let response;
   try {
     response = await fetchImpl(`https://verify.twilio.com/v2/Services/${env.TWILIO_VERIFY_SERVICE_SID}/${resource}`, {
-      method: 'POST', redirect: 'error', signal: AbortSignal.timeout(8000),
+      method: 'POST', redirect: 'manual', signal: AbortSignal.timeout(8000),
       headers: {
         authorization: `Basic ${btoa(`${env.TWILIO_ACCOUNT_SID}:${env.TWILIO_AUTH_TOKEN}`)}`,
         'content-type': 'application/x-www-form-urlencoded', accept: 'application/json',

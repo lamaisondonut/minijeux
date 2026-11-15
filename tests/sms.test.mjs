@@ -64,7 +64,7 @@ test('Twilio request uses the fixed Verify URL, SMS channel, normalized phone, a
   } });
   assert.equal(result.providerSid, `VE${'3'.repeat(32)}`);
   assert.equal(captured.url, `https://verify.twilio.com/v2/Services/${configured.TWILIO_VERIFY_SERVICE_SID}/Verifications`);
-  assert.equal(captured.options.redirect, 'error');
+  assert.equal(captured.options.redirect, 'manual');
   assert.equal(captured.options.method, 'POST');
   assert.equal(new URLSearchParams(captured.options.body).get('To'), '+15145551234');
   assert.equal(new URLSearchParams(captured.options.body).get('Channel'), 'sms');

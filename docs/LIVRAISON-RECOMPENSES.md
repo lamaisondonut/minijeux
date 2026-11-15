@@ -4,7 +4,7 @@ Code sauvegardé sur [`develop/noel-recompenses-v1`](https://github.com/lamaison
 
 ## Livré et vérifié
 
-Menu et logos officiels, moteur partagé et relecture serveur, migrations D1, réservations atomiques du budget et d’un premier SMS, codes uniques, règle glissante de téléphone, administration privée, audit, CSV et procédure de remise Lightspeed manuelle. Les tests des récompenses et de Noël passent localement et dans GitHub Actions ; [détails](TESTS-RECOMPENSES.md).
+Menu sans logos, signature textuelle GOAT, règlement client, moteur partagé et relecture serveur, migrations D1, réservations atomiques du budget et d’un premier SMS, codes uniques, règle glissante de téléphone, administration privée, audit, CSV et procédure de remise Lightspeed manuelle. Les tests des récompenses et de Noël passent localement et dans GitHub Actions ; [détails](TESTS-RECOMPENSES.md).
 
 Le dossier à publier reste **`v3`**. Les sources Functions sont compilées dans `v3/_worker.js`, vérifié dans le véritable moteur Cloudflare local. L’ancien HTML autonome ne comprend pas ce backend.
 
@@ -32,6 +32,6 @@ Ouvrir `http://localhost:8788/`. Sans services configurés, la réponse de statu
 
 ## Avant les gains réels
 
-Configurer une **D1 de prévisualisation**, les comptes employés nominatifs Access, Turnstile et les secrets serveur selon [le guide exact](RECOMPENSES-CLOUDFLARE.md). Faire approuver le fournisseur SMS et ses coûts, finaliser les règles, l’admissibilité, la confidentialité et la politique anti-abus. L’unicité technique d’un téléphone ne garantit pas l’unicité d’une personne.
+Suivre le [guide opérateur](ACTIVATION-RECOMPENSES.md) pour configurer une **D1 de prévisualisation**, les comptes employés nominatifs Access, Turnstile et les secrets serveur selon [le guide exact](RECOMPENSES-CLOUDFLARE.md). Faire approuver le fournisseur SMS et ses coûts, finaliser les règles, l’admissibilité, la confidentialité et la politique anti-abus. L’unicité technique d’un téléphone ne garantit pas l’unicité d’une personne.
 
-Les trois drapeaux d’approbation restent désactivés. La recette sur les vrais services de prévisualisation et l’approbation explicite du propriétaire restent nécessaires avant toute publication en production.
+Le diagnostic privé `/api/admin/setup` permet au responsable de constater la liaison et le schéma D1 effectifs sans exposer de secrets. Il ne prouve pas à lui seul les services SMS. Les trois drapeaux d’approbation restent désactivés. La recette sur les vrais services de prévisualisation et l’approbation explicite du propriétaire restent nécessaires avant toute publication en production.

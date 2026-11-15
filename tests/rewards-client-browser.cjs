@@ -77,7 +77,7 @@ async function open(browser, options={}) {
   let body=null;try{body=request.postDataJSON()}catch{}
   requests.push({pathname,method:request.method(),body});
   let response;
-  if(pathname==='/api/rewards/status')response={body:options.status||status()};
+  if(pathname==='/api/rewards/status')response={status:options.statusCode||200,body:options.status||status()};
   else if(options.handle)response=await options.handle(pathname,body,requests);
   if(!response)throw new Error(`Unexpected test API request ${pathname}`);
   await route.fulfill({status:response.status||200,contentType:'application/json',body:JSON.stringify(response.body)});
@@ -87,6 +87,8 @@ async function open(browser, options={}) {
  if(options.abortModule)await page.waitForFunction(()=>document.querySelector('#game').dataset.ready==='true'&&!document.querySelector('#start').disabled);
  else await page.waitForFunction(()=>document.querySelector('#game').dataset.ready==='true'&&window.BorealRewards);
  await page.evaluate(()=>BorealRewardMenu.ready);
+ check(await page.locator('#home img').count()===0,'actual player menu contains neither logo');
+ check(!/récompenses en préparation|\bserveur\b|\bSQL\b|\bHMAC\b|\btick\b|\bphase\b|\bversion\b/i.test(await page.locator('#home').innerText()),'actual menu copy contains no preparation promise or developer language');
  return {context,page,errors,requests,external,async close(){check(errors.length===0,`no browser errors (${options.name||'scenario'})`);check(external.length===0,'no real external security or SMS request');await context.close()}};
 }
 const text = page => page.locator('#rewardClaim').innerText();
@@ -109,10 +111,17 @@ const text = page => page.locator('#rewardClaim').innerText();
    await test.close();
   }
   {
+   const test=await open(browser,{name:'unavailable availability service',statusCode:503,status:{error:'configuration_pending',message:'SQL server phase HMAC'}}),{page}=test;
+   check((await page.locator('.boreal-reward-info').innerText()).includes('Mode libre — sans récompense')&&await page.locator('.boreal-reward-tiers').count()===0,'unavailable status offers free play without inventing reward availability');
+   await page.click('#start');
+   check(await page.evaluate(()=>rewardsTest.state().mode==='playing')&&test.requests.every(r=>r.pathname==='/api/rewards/status'),'unavailable status starts only ordinary play without financial or SMS requests');
+   await test.close();
+  }
+  {
    const test=await open(browser,{name:'failed module ordinary fallback',abortModule:true}),{page}=test;
    await page.click('#start');
    check(await page.evaluate(()=>!window.BorealRewards&&rewardsTest.state().mode==='playing'&&rewardsTest.state().shared===null),'failed module opens the explicit ordinary offline fallback');
-   check((await page.locator('#rewardStartNote').innerText()).includes('aucune récompense monétaire'),'fallback HUD is explicitly marked without money');
+   check((await page.locator('#rewardStartNote').innerText()).includes('Mode libre — sans récompense'),'fallback HUD is explicitly marked without money');
    check(test.requests.every(r=>r.pathname==='/api/rewards/status'),'failed client module cannot call reward start or submit an original score');
    await test.close();
   }
@@ -130,11 +139,11 @@ const text = page => page.locator('#rewardClaim').innerText();
    await page.locator('#boreal-open-rules').click();check(await page.locator('#boreal-rules').isVisible(),'provided rules dialog is accessible from the actual menu');
    await page.keyboard.press('Escape');check(!await page.locator('#boreal-rules').isVisible(),'rules dialog closes with Escape before play');
    await page.click('#start');
-   check((await page.locator('#rewardStartNote').innerText()).includes('Entraînement — aucune récompense monétaire'),'pending state clearly starts free practice without a promise');
+   check((await page.locator('#rewardStartNote').innerText()).includes('Mode libre — sans récompense'),'pending state clearly starts free practice without a promise');
    await page.evaluate(()=>{rewardsTest.playTo(60,[]);rewardsTest.draw();rewardsTest.playTo(120,[]);rewardsTest.draw()});
    check(await page.evaluate(()=>rewardsTest.state().score>0&&new Set(window.__heroDraws.map(x=>JSON.stringify(x))).size>=2),'actual shared practice engine scores and draws different Christmas running frames');
    await page.evaluate(()=>rewardsTest.playTo(1000,[]));
-   check((await page.locator('#feedback').innerText()).includes('aucune récompense monétaire'),'practice result clearly has no money');
+   check((await page.locator('#feedback').innerText()).includes('sans récompense'),'practice result clearly has no money');
    check(test.requests.every(r=>r.pathname==='/api/rewards/status'),'pending practice sends no start, finish, identity or SMS request');
    await test.close();
   }
@@ -152,7 +161,7 @@ const text = page => page.locator('#rewardClaim').innerText();
    check((await text(page)).includes('Défi extrême')&&(await text(page)).includes('Aucune récompense monétaire'),'actual extreme difficulty and absence of money are shown before a second click');
    await page.getByRole('button',{name:'Commencer en Défi extrême'}).click();
    check(await page.evaluate(()=>rewardsTest.state().shared.mode==='extreme'&&rewardsTest.state().speed===380),'second explicit click starts the extreme shared physics');
-   await page.evaluate(()=>BorealRewardMenu.renderStatus({mode:'rewards',rewardsEnabled:true,capCents:2000}));
+   await page.evaluate(()=>BorealRewardMenu.renderStatus({mode:'rewards',rewardsEnabled:true,capCents:2000,turnstileSiteKey:'test-sitekey'}));
    await page.evaluate(()=>rewardsTest.playTo(100,[]));
    check(await page.evaluate(()=>rewardsTest.state().shared.mode==='extreme'&&rewardsTest.state().speed>=380),'later status refresh cannot change a running extreme session');
    await page.click('#pauseBtn');const frozen=await page.evaluate(()=>rewardsTest.state().shared.ticks);
@@ -191,9 +200,9 @@ const text = page => page.locator('#rewardClaim').innerText();
    }}),{page}=test;
    check(await page.locator('input').count()===0,'winning run also starts without identity collection');
    const announced=await page.locator('.boreal-reward-info').innerText();
-   check(/30 minutes, pauses comprises/.test(announced)&&/15 minutes de jeu effectif/.test(announced)&&/10 minutes suivant la fin/.test(announced),'real menu announces reservation, active play and SMS confirmation time limits before play');
+   check(/30 minutes, pauses comprises/.test(announced)&&/15 minutes de jeu maximum/.test(announced)&&/10 minutes suivant la fin/.test(announced),'real menu announces reservation, active play and SMS confirmation time limits before play');
    await page.click('#start');await page.waitForFunction(()=>rewardsTest.state().shared?.mode==='rewards');
-   check((await page.locator('#rewardStartNote').innerText()).includes('Valable jusqu’à')&&(await page.locator('#rewardStartNote').innerText()).includes('Plafond réservé'),'announced cap and wall-clock expiry are visible at start');
+   check((await page.locator('#rewardStartNote').innerText()).includes('Admissible jusqu’à')&&(await page.locator('#rewardStartNote').innerText()).includes('Maximum :'),'announced cap and wall-clock expiry are visible at start');
    await page.evaluate(jumps=>rewardsTest.playTo(100,jumps),fixture.jumps);
    await page.setViewportSize({width:390,height:900});await page.evaluate(()=>rewardsTest.resize());
    await page.evaluate(jumps=>rewardsTest.playTo(120,jumps),fixture.jumps);
@@ -203,22 +212,23 @@ const text = page => page.locator('#rewardClaim').innerText();
    const ended=await page.evaluate(({ticks,jumps})=>rewardsTest.playTo(ticks,jumps),fixture);
    check(ended.shared.ended&&Math.floor(ended.shared.score)===fixture.expectedScore&&ended.shared.ticks===fixture.ticks,'browser plays the genuine >10000-point shared-engine fixture with pause and two resizes');
    await page.getByRole('button',{name:'Réessayer la vérification',exact:true}).waitFor();
-   check((await text(page)).includes('preuve de la partie est conservée'),'finish network error retains replay proof for retry');
+   check((await text(page)).includes('Ta partie est conservée'),'finish network error retains replay proof for retry');
    await page.getByRole('button',{name:'Réessayer la vérification',exact:true}).click();
    await page.locator('input[name=phone]').waitFor();
    check(finishBodies.length===2&&JSON.stringify(finishBodies[0])===JSON.stringify(finishBodies[1]),'finish retry sends the identical session, tick, jump and resize log');
    check(finishBodies[1].ticks===fixture.ticks&&JSON.stringify(finishBodies[1].jumps)===JSON.stringify(fixture.jumps)&&finishBodies[1].resizes.length===2&&!('score'in finishBodies[1]),'real browser proof has original jump inputs and no fabricated score');
-   check(await page.locator('.reward-code').count()===0&&(await text(page)).includes('Aucun code n’est attribué avant confirmation du serveur'),'qualifying score alone never displays an awarded code');
+   check(await page.locator('.reward-code').count()===0&&(await text(page)).includes('Aucun code n’est attribué avant la confirmation du gain'),'qualifying score alone never displays an awarded code');
    await page.locator('input[name=firstName]').fill('JacquesTest');await page.locator('input[name=lastName]').fill('BorealTest');await page.locator('input[name=phone]').fill('+15145551234');await page.locator('input[name=consent]').check();
    await page.getByRole('button',{name:'Recevoir mon code SMS'}).click();await page.locator('input[name=code]').waitFor();
    const sms=test.requests.find(r=>r.pathname==='/api/rewards/sms/request').body;
    check(sms.sessionId==='genuine-winning-session'&&sms.phone==='+15145551234'&&sms.firstName==='JacquesTest'&&sms.lastName==='BorealTest'&&sms.consentVersion==='rewards-2026-11-v1','SMS identity and consent are requested only after the verified winning run');
    check(await page.locator('.reward-code').count()===0,'requesting an SMS still does not confirm a gain');
-   await page.locator('input[name=code]').fill('123456');await page.getByRole('button',{name:'Vérifier et réclamer'}).click();
+   await page.locator('input[name=code]').fill('123456');await page.getByRole('button',{name:'Confirmer mon gain'}).click();
    await page.getByText('Le code SMS est incorrect. Réessaie avec le code reçu.',{exact:true}).waitFor();
-   check(await page.locator('.reward-code').count()===0&&await page.getByRole('button',{name:'Vérifier et réclamer'}).isEnabled(),'unawarded server verification stays retryable without a code');
-   await page.getByRole('button',{name:'Vérifier et réclamer'}).click();await page.locator('.reward-code').waitFor();
+   check(await page.locator('.reward-code').count()===0&&await page.getByRole('button',{name:'Confirmer mon gain'}).isEnabled(),'unawarded server verification stays retryable without a code');
+   await page.getByRole('button',{name:'Confirmer mon gain'}).click();await page.locator('.reward-code').waitFor();
    check(await page.locator('.reward-code').innerText()==='BOREAL-TEST-VERIFIED'&&(await text(page)).includes('Code à usage unique'),'code appears only after explicit server award with one-use terms');
+   check((await text(page)).includes('Le code n’est pas une carte-cadeau déjà émise')&&(await text(page)).includes('en personne aux Boréalistes'),'confirmed code is clearly a claim bon redeemed in person, not an issued gift card');
    const stored=await page.evaluate(()=>JSON.stringify({...localStorage,...sessionStorage}));
    check(!/15145551234|JacquesTest|BorealTest|123456|BOREAL-TEST-VERIFIED/.test(stored),'phone, names, SMS and award code are absent from browser storage');
    await page.getByRole('button',{name:'Voir le résultat',exact:true}).click();
@@ -231,7 +241,15 @@ const text = page => page.locator('#rewardClaim').innerText();
    await test.close();
   }
   {
-   const test=await open(browser,{name:'failed security allows practice',status:status({turnstileSiteKey:null})}),{page}=test;
+   const test=await open(browser,{name:'missing security uses free mode',status:status({turnstileSiteKey:null})}),{page}=test;
+   check((await page.locator('.boreal-reward-info').innerText()).includes('Mode libre — sans récompense'),'missing security configuration never advertises a reward run');
+   await page.click('#start');
+   check(await page.evaluate(()=>rewardsTest.state().mode==='playing')&&test.requests.every(r=>r.pathname==='/api/rewards/status'),'missing security configuration starts free play without a financial request');
+   await test.close();
+  }
+  {
+   const test=await open(browser,{name:'failed security allows practice'}),{page}=test;
+   await page.evaluate(()=>{window.turnstile.render=()=>{throw new Error('Security service unavailable')}});
    await page.click('#start');await page.getByRole('button',{name:'Jouer sans récompense'}).waitFor();
    check(await page.evaluate(()=>rewardsTest.state().shared===null),'missing security configuration fails closed before financial play');
    await page.getByRole('button',{name:'Jouer sans récompense'}).click();

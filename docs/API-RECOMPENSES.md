@@ -1,6 +1,6 @@
 # API Récompenses
 
-Le backend est fourni dans `functions/`, `server/` et `migrations/0001_rewards.sql`. Aucun service payant ni déploiement de production n’est activé. La migration doit être appliquée à une D1 dédiée avant activation. Le moteur partagé `v3/game-session-engine.mjs` détermine tous les scores depuis la graine, les sauts et les redimensionnements ; aucun score envoyé par le navigateur n’est accepté comme preuve.
+Le backend est fourni dans `functions/`, `server/` et `migrations/0001_rewards.sql`, puis compilé dans le fichier publié `v3/_worker.js`. Aucun service payant ni déploiement de production n’est activé par le dépôt. La migration doit être appliquée à une D1 dédiée avant activation; aucune liaison D1 distante n'a été vérifiée dans cet environnement. Le moteur partagé `v3/game-session-engine.mjs` détermine tous les scores depuis la graine, les sauts et les redimensionnements; aucun score envoyé par le navigateur n’est accepté comme preuve. Voir le [guide d'activation](ACTIVATION-RECOMPENSES.md) pour l'ordre des opérations, les adresses et les accès manquants.
 
 ## Configuration
 
@@ -8,7 +8,9 @@ Bindings et variables : `DB`, `APP_ORIGIN` (origine HTTPS exacte), `REWARDS_ENAB
 
 Secrets : `REWARDS_HMAC_SECRET` (au moins 32 octets), `TURNSTILE_SECRET`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_VERIFY_SERVICE_SID`. `SMS_CHALLENGE_SECRET` est facultatif (au moins 32 octets) ; sinon la clé HMAC sert aussi à signer les défis. Les trois autorisations doivent être exactement `true`. Turnstile doit utiliser l’action `boreal-session` et le nom d’hôte de `APP_ORIGIN`.
 
-Les employés sont provisionnés dans `employees(sub,email,name,role,active)` à partir de leur identité Access vérifiée. `role` vaut `staff` ou `manager`. `/api/admin/identity` donne au seul utilisateur son `sub` et son `email` vérifiés, même avant ajout à cette liste. L’email d’un simple en-tête n’est jamais une identité.
+Les employés sont provisionnés dans `employees(sub,email,name,role,active)` à partir de leur identité Access vérifiée. `role` vaut `staff` ou `manager`. Les comptes sont individuels, avec authentification multifacteur imposée par la politique d'accès. `/api/admin/identity` donne au seul utilisateur son `sub` et son `email` vérifiés, même avant ajout à cette liste. L’email d’un simple en-tête n’est jamais une identité.
+
+Le statut, le départ et les demandes/vérifications SMS refusent l'activation si une table, une colonne ou une protection attendue manque dans D1. Les contrôles de schéma réussis peuvent être conservés pendant 60 secondes par liaison dans chaque instance du Worker; les échecs ne sont pas conservés. Les trois approbations restent distinctes d'une preuve de bon fonctionnement des fournisseurs.
 
 ## Contrat public
 
@@ -20,6 +22,8 @@ Toutes les réponses privées sont `Cache-Control: no-store`. Toutes les écritu
 - `POST /api/rewards/sms/request` : `{sessionId,phone,firstName,lastName,consentVersion}` → `{challengeId,expiresAt}`. `consentVersion` vaut `rewards-2026-11-v1`.
 - `POST /api/rewards/sms/verify` : `{challengeId,phone,code}` → `{awarded,score,reward?,reason?}`. Le défi signé et son enregistrement lient propriétaire, partie et HMAC du téléphone. Le premier téléphone vérifié lie définitivement la partie. Ni téléphone brut ni OTP ne sont enregistrés.
 - `GET /api/rewards/confirmation` : `{reward:null|reward}` ; récupération du dernier bon du seul propriétaire du navigateur.
+
+Le reçu public contient uniquement les données du gain et de son bénéficiaire, avec ses dates et son statut. Les identités des employés, références Lightspeed et motifs internes restent réservés aux API d'administration.
 
 Les erreurs sont `{error: "code_machine", message: "explication"}` avec un statut HTTP approprié. Aucun endpoint de test ni contournement public du fournisseur n’existe.
 
@@ -35,11 +39,13 @@ Le quota est attribué au **jour de départ à Toronto** : une partie commencée
 
 ## Administration
 
-L’accès statique `/admin` et `/v3/admin*`, ainsi que chaque API d’administration, exige un JWT Access RS256 valide (issuer, audience, expiration, JWKS fixes) et un employé actif. Le mode avancé Pages doit inclure ces chemins et `/api/*` dans `_routes.json` pour que le middleware soit exécuté.
+L’accès statique `/admin` et `/v3/admin*`, ainsi que les API d’administration, exige un JWT Access RS256 valide (issuer, audience, expiration, JWKS fixes) et un employé actif. Seul `/api/admin/identity` exige le JWT sans inscription préalable dans la liste d'employés. Le mode avancé Pages doit inclure ces chemins et `/api/*` dans `_routes.json` pour que le middleware soit exécuté.
 
 - `GET /api/admin/me` → `{employee:{sub,subject,email,name,role}}`.
+- `GET /api/admin/identity` → `{sub,email}` vérifiés pour le compte Access connecté, avant inscription éventuelle dans la liste d'employés.
+- `GET /api/admin/setup` → `{checkedAt,configuration,database,rewardsConfigured,providerVerification}`; réservé au rôle `manager`. `database` fournit `connected`, `schemaReady` et les inventaires manquants. Les paramètres sont des booléens, aucun secret n'est retourné. Le diagnostic interroge la D1 réellement liée à ce déploiement, mais n'appelle aucun fournisseur : `providerVerification` vaut `not_performed`. Un schéma connecté ne prouve pas qu'un SMS ou une attribution réelle a réussi. L'accès au diagnostic reste soumis au JWT Access et à la liste active des employés, même lorsque d'autres tables ou secrets de récompense manquent.
 - `GET /api/admin/rewards?code=&status=&cursor=` → `{rewards,nextCursor?}`.
-- `GET /api/admin/budget` → `{month,usedCents,reservedCents,remainingCents,pendingCount}`.
+- `GET /api/admin/budget` → `{month,budgetCents,usedCents,reservedCents,remainingCents,pendingCount,usedCount,countScope}`; les compteurs de codes portent sur tout le registre (`countScope: "all"`).
 - `GET /api/admin/audit?rewardId=` → `{audit}`.
 - `GET /api/admin/export` accepte les mêmes filtres et produit un CSV UTF-8 BOM, avec protection des formules, noms des employés et horodatages. L’export est audité.
 - `POST /api/admin/rewards/:id/claim` → `{reward}` ; transition atomique et verrou au premier employé.
@@ -51,3 +57,5 @@ L’accès statique `/admin` et `/v3/admin*`, ainsi que chaque API d’administr
 Node 24 est requis pour les tests SQLite : `node tests/rewards-api.test.mjs`, `node tests/d1-concurrency.test.mjs`, `node --test tests/sms*.test.mjs`.
 
 Les tests utilisent de vrais replays gagnants (10526 points), une D1 simulée avec SQLite réel, des réponses fournisseur simulées et de vraies signatures RSA. Les tests de concurrence lancent des workers avec connexions SQLite distinctes : réservations, plafonds restants, gains concurrents, téléphone partagé, double réclamation, acteur verrouillé, quotas SMS et tentatives OTP. Aucun SMS réel n’est envoyé.
+
+La capacité CPU du Worker déployé doit être vérifiée avant l'ouverture des gains : les relectures locales sous Node ont été mesurées à 14–28 ms, alors que [Workers Free documente 10 ms de CPU par requête](https://developers.cloudflare.com/workers/platform/limits/). Vérifier la limite applicable aux Functions Pages et les mesures réelles; une mesure Node n'est pas une mesure Cloudflare. Aucun changement de forfait n'est autorisé sans accord.
