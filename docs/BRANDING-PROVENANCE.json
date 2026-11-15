@@ -1,0 +1,10 @@
+{
+  "source": "defi-boreal-menu.zip fourni par le client",
+  "originalModuleSha256": "fb6e5dbd101c0ccd5f08f1a1843e90641bae1c68549ade220ea1af1aa6bfc4fd",
+  "assets": {
+    "v3/assets/branding/borealistes-logo.png": "913aacb8f7cd3f4e779e1573806293ce21195563ef984a2ea6f54b4ecfe4d50c",
+    "v3/assets/branding/borealistes-sapins.png": "5ce7f4c32a76d513d08cfc255a713c4c2169a6956872c540e24c3a44523aaabb",
+    "v3/assets/branding/goat-symbol.png": "5b9eabf9a966425fb27d3621fe582d98824f694d0ad1563652ac9161f5a53747",
+    "v3/assets/branding/goat-wordmark.png": "26b63b9cd501a814db628a2044d4b2428b946e73ee1da91965c92810faa45f20"
+  }
+}
