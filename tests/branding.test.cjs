@@ -10,7 +10,7 @@ for (const [file, hash] of Object.entries(manifest.assets)) {
   assert.equal(createHash('sha256').update(fs.readFileSync(path.join(root,file))).digest('hex'), hash, `${file}: exact supplied logo bytes`);
 }
 const source = fs.readFileSync(path.join(root,'v3/menu-recompenses.js'),'utf8');
-for (const color of ['#2D351E','#666C37','#EFCD7A','#FFFFFF']) assert.ok(source.includes(color));
+for (const color of ['#2D351E','#666C37','#EFCD7A','#FFFFFF']) assert.ok((source+fs.readFileSync(path.join(root,'v3/menu-noel.css'),'utf8')).includes(color));
 assert.ok(!/new Image\(|assets\/branding\/|boreal-brand-logo/.test(source),'menu does not insert either logo');
 assert.ok(source.includes('Un jeu imaginé et développé par GOAT Agence'),'text signature retained');
 assert.ok(!/récompenses en préparation/i.test(source),'public menu has no preparation promise');

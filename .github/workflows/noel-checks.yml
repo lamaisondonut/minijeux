@@ -22,6 +22,7 @@ jobs:
       - name: Original mechanics and Christmas browser checks
         run: |
           export CHROMIUM_PATH="$(node -p "require('playwright').chromium.executablePath()")"
+          export BOREAL_HOME_ARTIFACTS="artifacts/noel-home-responsive"
           npm run test:noel
       - uses: actions/upload-artifact@v4
         with:
@@ -29,4 +30,5 @@ jobs:
           path: |
             artifacts/noel/
             artifacts/noel-home/
+            artifacts/noel-home-responsive/
           retention-days: 30
