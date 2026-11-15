@@ -411,10 +411,10 @@ async function main() {
       await page.close();
     });
     await test('manager reviews both explicit exceptions before generating a manual food-only code', async () => {
-      const page=await browser.newPage();const calls=[];
+      const page=await browser.newPage({viewport:{width:320,height:780}});const calls=[];
       await mockApi(page,{employee:employeeB,intercept:async({endpoint,request,route,send})=>{
         if(endpoint==='/manual-rewards/quote'){await send(route,200,{budgetCents:10000,usedCents:10000,reservedCents:0,valueCents:2000,projectedOverrunCents:2000,additionalExceptionalCents:2000,cooldownRequired:true,manualRewardsEnabled:true,quote:{month:'2026-11',budgetCents:10000,usedCents:10000,reservedCents:0,revision:0,lastRewardId:'previous'}});return true;}
-        if(endpoint==='/manual-rewards'){calls.push(request.postDataJSON());await send(route,200,{reward:fixture({source:'manual',score:null,code:'GOAT-MANUAL-TEST'}),notification:{status:'disabled'}});return true;}
+        if(endpoint==='/manual-rewards'){calls.push(request.postDataJSON());await send(route,200,{reward:fixture({source:'manual',score:null,code:'GOAT-FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF'}),notification:{status:'disabled'}});return true;}
         return false;
       }});
       await page.goto(origin+'/admin/');await page.locator('.manual-panel').waitFor();
@@ -424,9 +424,10 @@ async function main() {
       assert.match(await page.locator('.manual-panel').innerText(),/Dépassement total après émission/);
       await page.locator('.manual-panel input[type=checkbox]').nth(0).check();await page.locator('.manual-panel input[type=checkbox]').nth(1).check();
       await page.locator('.manual-panel textarea').nth(0).fill('Budget exceptionnel autorisé');await page.locator('.manual-panel textarea').nth(1).fill('Délai exceptionnel autorisé');await confirm.click();
-      await page.getByText('Code : GOAT-MANUAL-TEST',{exact:true}).waitFor();assert.equal(calls.length,1);assert.equal(calls[0].authorizeBudgetOverrun,true);assert.equal(calls[0].authorizeCooldown,true);assert.equal(calls[0].valueCents,2000);
+      await page.getByText('Code : GOAT-FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF',{exact:true}).waitFor();assert.equal(calls.length,1);assert.equal(calls[0].authorizeBudgetOverrun,true);assert.equal(calls[0].authorizeCooldown,true);assert.equal(calls[0].valueCents,2000);
       assert.match(await page.locator('.page-intro').innerText(),/uniquement aux aliments.*boissons alcooliques/s);
-      await page.screenshot({path:path.join(artifacts,'admin-manual-food-390.png'),fullPage:true});await page.close();
+      assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),'manual issuance overflows 320px');
+      await page.screenshot({path:path.join(artifacts,'admin-manual-food-320.png'),fullPage:true});await page.close();
     });
     await test('Preview consumption explicitly records no invoice discount and needs no food value',async()=>{
       const page=await browser.newPage(),calls=[];
