@@ -6,6 +6,7 @@ import { handleRequest } from "../server/api.mjs";
 import { startSession, cleanup, award } from "../server/store.mjs";
 import { POLICY_VERSION, secureId, monthWindow, scoreValue, torontoDay } from "../server/common.mjs";
 import { privateHmac } from "../server/sms.mjs";
+import { customerColumns } from '../server/customer.mjs';
 import { migrateSqlite, migrationFiles, migrationSql } from "./helpers/migrations.cjs";
 const schema = readFileSync(new URL("../migrations/0001_rewards.sql", import.meta.url), "utf8");
 const fixture = JSON.parse(readFileSync(new URL("./fixtures/game-session-winning-rewards.json", import.meta.url), "utf8"));
@@ -609,4 +610,11 @@ test('only an active manager can grant a justified one-use phone/device exceptio
   const blocked=await api(env,'/api/games/start',{width:390,height:844,expectedMode:'rewards'});assert.equal((await blocked.json()).playOnly,true);
   const info=await(await api(env,path+'/eligibility',undefined,auth)).json();assert.equal(info.history.length,2);assert.equal(info.potentialDuplicate,true);assert.ok(info.phone.nextEligibleAt);
   assert.equal(env.DB.sqlite.prepare("SELECT COUNT(*) n FROM audit WHERE action='manager_exception_granted'").get().n,2);assert.equal(env.DB.sqlite.prepare("SELECT COUNT(*) n FROM audit WHERE action='manager_exception_consumed'").get().n,2);
+});
+
+test('a simultaneous attribution during eligibility reads returns the existing code rather than a false cooldown',async()=>{
+  const env=launchEnvironment(),run=await ownedGame(env);await api(env,'/api/games/finish',replay(run));const id=secureId(),phone='+15145551234',phoneHash=await privateHmac(env,'phone',phone),ownerHash=run.owner_hash;
+  const customer=await customerColumns(env,{phone,firstName:'Camille',lastName:'Noël',rewardId:id}),originalPrepare=env.DB.prepare.bind(env.DB);let inserted=false;
+  env.DB.prepare=sql=>{const statement=originalPrepare(sql);if(sql.includes('SELECT id,confirmed_at')&&sql.includes('device_hash=?')){const first=statement.first.bind(statement);statement.first=async()=>{if(!inserted){inserted=true;await award(env.DB,{id,sessionId:run.id,ownerHash,phoneHash,now,firstName:'Camille',lastName:'Noël',customer,unverifiedProfile:true});}return first();};}return statement;};
+  const response=await api(env,'/api/rewards/claim',{sessionId:run.id,phone,firstName:'Camille',lastName:'Noël',consentVersion:POLICY_VERSION});assert.equal(response.status,200);assert.equal((await response.json()).reward.id,id);assert.equal(env.DB.sqlite.prepare('SELECT COUNT(*) n FROM rewards').get().n,1);
 });

@@ -238,19 +238,21 @@ async function directClaim(request,env,body,now) {
   const phone=normalizePhone(body.phone),phoneHash=await privateHmac(env,'phone',phone);
   const firstName=string(body.firstName,'first_name',80),lastName=string(body.lastName,'last_name',80);
   if(body.consentVersion!==POLICY_VERSION)throw new ApiError(400,'consent_required');
-  const existing=await stmt(env.DB,'SELECT * FROM rewards WHERE session_id=?',s.id).first();
-  if(existing){
+  const existingReply=async()=>{
+    const existing=await stmt(env.DB,'SELECT * FROM rewards WHERE session_id=?',s.id).first();
+    if(!existing)return null;
     if(existing.phone_hash!==phoneHash)throw new ApiError(409,'session_consumed','Cette partie a déjà attribué son code.');
     return json({awarded:true,score:existing.score,reward:publicRewardView(existing,now)},200,{"Set-Cookie":cookie(ownerCookie(request))});
-  }
+  };
+  const initialReply=await existingReply();if(initialReply)return initialReply;
   if(s.state!=='eligible'||s.reservation_active!==1||s.expires_at<=now||s.claim_deadline<=now)throw new ApiError(409,'session_not_eligible','Cette partie ne peut plus confirmer une récompense.');
   const ip=await ipHash(request,env);
   await rateLimit(env.DB,[{key:'claim:o:'+ownerHash,windowMs:3600000,limit:10},{key:'claim:p:'+phoneHash,windowMs:86400000,limit:10},{key:'claim:i:'+ip,windowMs:3600000,limit:30}],now);
   const restriction=await getRestrictions(env.DB,{phoneHash,deviceHash:ownerHash,now:Date.now()});
-  if(restriction.blocked){await recordDuplicate(env.DB,{restriction,ownerHash,firstName,lastName,now:Date.now()});return json({error:restriction.reason,message:'Tu as déjà remporté une récompense au cours des 30 derniers jours. Tu peux continuer à jouer autant que tu le souhaites !',nextEligibleAt:restriction.nextEligibleAt},409);}
+  if(restriction.blocked){const completed=await existingReply();if(completed)return completed;await recordDuplicate(env.DB,{restriction,ownerHash,firstName,lastName,now:Date.now()});return json({error:restriction.reason,message:'Tu as déjà remporté une récompense au cours des 30 derniers jours. Tu peux continuer à jouer autant que tu le souhaites !',nextEligibleAt:restriction.nextEligibleAt},409);}
   const id=secureId(),customer=await customerColumns(env,{phone,firstName,lastName,rewardId:id});
   const result=await award(env.DB,{id,sessionId:s.id,ownerHash,phoneHash,now:Date.now(),firstName,lastName,customer,unverifiedProfile:true});
-  if(!result.reward){if(['phone_cooldown','device_cooldown'].includes(result.reason)){const restriction=await getRestrictions(env.DB,{phoneHash,deviceHash:ownerHash,now:Date.now()});await recordDuplicate(env.DB,{restriction,ownerHash,firstName,lastName,now:Date.now()});return json({error:result.reason,message:'Tu as déjà remporté une récompense au cours des 30 derniers jours. Tu peux continuer à jouer autant que tu le souhaites !',nextEligibleAt:restriction.nextEligibleAt},409);}throw new ApiError(409,'session_consumed','Cette partie ne peut plus attribuer de code.');}
+  if(!result.reward){if(['phone_cooldown','device_cooldown'].includes(result.reason)){const completed=await existingReply();if(completed)return completed;const restriction=await getRestrictions(env.DB,{phoneHash,deviceHash:ownerHash,now:Date.now()});await recordDuplicate(env.DB,{restriction,ownerHash,firstName,lastName,now:Date.now()});return json({error:result.reason,message:'Tu as déjà remporté une récompense au cours des 30 derniers jours. Tu peux continuer à jouer autant que tu le souhaites !',nextEligibleAt:restriction.nextEligibleAt},409);}throw new ApiError(409,'session_consumed','Cette partie ne peut plus attribuer de code.');}
   return json({awarded:true,score:result.reward.score,reward:publicRewardView(result.reward,now)},200,{"Set-Cookie":cookie(ownerCookie(request))});
 }
 async function adminRate(request, env, employee, path, now) {
