@@ -1,57 +1,57 @@
-# Activer les véritables récompenses
+# Recette réelle en Preview — aucune publication de production
 
-État au 14 novembre 2026 : développement sur `develop/noel-recompenses-v1`. La liaison à une D1 distante, les comptes employés et les services SMS réels ne sont pas vérifiés depuis cet environnement, qui ne dispose pas des accès Cloudflare et Twilio nécessaires. La production actuelle reste sur `livraison-v3`. Aucune dépense ni publication en production n'est autorisée par ce guide.
+Le propriétaire autorise les vrais SMS Twilio et les vrais codes pour cet essai interne, avec consommation des codes **sans rabais dans Lightspeed**. Les codes gardent leur format normal. Production, `livraison-v3` et l’ouverture aux clients restent inchangées. La validation RACJ reste nécessaire avant la promotion réelle.
 
-## Adresses
+## Ordre de configuration
 
-| Destination | Adresse |
+1. Créer **`defi-boreal-recompenses-preview`**, distincte de **`defi-boreal-recompenses`**. Dans Pages → `minijeux` → Settings → Bindings → **Preview**, lier `DB` à cette nouvelle base. Ne pas modifier la liaison Production. Les liaisons Preview sont partagées entre branches Preview du projet.
+2. Sur cette base **vide uniquement**, suivre le [schéma console](../proposals/sql/preview_schema_development.sql) : PRAGMA, lecture `application_tables=0`, puis chaque instruction complète dans l’ordre. Terminer par l’insertion du réglage initial et la vérification des clés étrangères. Pour une base existante, voir [l’ordre des migrations et leur exécution atomique](AUDIT-BUDGET-CONFIGURABLE.md#sql--fichiers-séparés-ordre-dexécution). Ne rien appliquer à la base Production.
+3. Déployer la branche `develop/noel-budget-configurable`, répertoire publié `v3`. `APP_ORIGIN` doit correspondre exactement à l’alias HTTPS renvoyé par Cloudflare, prévu : `https://develop-noel-budget-configurable.minijeux-4gy.pages.dev`. Les écritures sur une autre origine sont volontairement refusées.
+4. Protéger la Preview réservée aux testeurs par Cloudflare Access, comptes individuels et MFA. Configurer `ACCESS_TEAM_DOMAIN` et `ACCESS_AUD`. Pour chaque employé, se connecter puis relever son `sub` et son email vérifiés via `/api/admin/identity`. Le responsable de D1 ajoute ensuite un employé actif. Exemple à remplacer par les valeurs **réellement vérifiées** :
+
+```sql
+INSERT INTO employees(sub,email,name,role,active)
+VALUES('IDENTIFIANT_ACCESS_VERIFIE','EMAIL_ACCESS_VERIFIE','NOM_EMPLOYE','manager',1);
+```
+
+Utiliser `staff` pour le personnel. Ne pas utiliser de compte partagé. Ce contrôle d’accès à l’environnement d’essai ne crée pas de compte joueur dans le mini-jeu.
+
+5. Configurer les variables et secrets serveur **Preview seulement** :
+
+| Paramètre | Valeur attendue |
 |---|---|
-| Prévisualisation de la branche | https://develop-noel-recompenses-v1.minijeux-4gy.pages.dev/ |
-| Administration de prévisualisation | https://develop-noel-recompenses-v1.minijeux-4gy.pages.dev/admin |
-| Administration après publication finale autorisée | https://minijeux-4gy.pages.dev/admin |
+| `REWARDS_HMAC_SECRET` | Valeur aléatoire distincte de Production, 32 octets minimum |
+| `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET` | Clés du même widget, domaine de la Preview et action `boreal-session` |
+| `SMS_PROVIDER` | `twilio` |
+| `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` | Compte réel autorisé pour la recette ; ne pas les transmettre dans le chat |
+| `TWILIO_VERIFY_SERVICE_SID` | Service Verify `VA…` pour le code de vérification |
+| `TWILIO_MESSAGING_SERVICE_SID` | Service Messaging `MG…` avec expéditeur autorisé, pour le SMS contenant le bon |
+| `SMS_DAILY_LIMIT` | Plafond explicite d’essai entre 1 et 100, p. ex. 10 demandes Verify |
+| `NOTIFICATION_SMS_DAILY_LIMIT` | Plafond distinct, p. ex. 10 messages de bons ; plusieurs segments possibles par message |
+| `DEPLOYMENT_ENVIRONMENT` | `preview` |
+| `PREVIEW_TEST_REDEMPTION` | `true`, exclusivement pour consommer les codes sans rabais pendant cette recette |
 
-Ces adresses identifient les destinations prévues; elles ne prouvent pas qu'elles servent les changements locaux ni que les récompenses y sont activées.
+Configurer aussi les destinations autorisées, les restrictions géographiques et les limites financières du compte Twilio. Si le compte est en essai, le numéro destinataire doit être autorisé selon ses règles. Aucun financement ni changement de forfait n’est effectué par le code.
 
-## Ce qui reste à fournir ou à autoriser
+6. Pour cet essai interne autorisé seulement, configurer en **Preview** `REWARDS_ENABLED=true`, `SMS_APPROVED=true`, `TERMS_APPROVED=true`, `NOTIFICATION_SMS_ENABLED=true`, et `MANUAL_REWARDS_ENABLED=true` si le parcours manuel est testé. Ces valeurs ne constatent aucune validation RACJ et ne doivent pas être copiées en Production. Restreindre l’environnement aux testeurs. Redéployer la Preview après modification de ses liaisons et paramètres.
+7. Le gestionnaire connecté ouvre `/api/admin/setup` et vérifie `database.connected=true`, `database.schemaReady=true`, aucune colonne/table/protection manquante. Le diagnostic ne contacte pas les fournisseurs et ne prouve aucun SMS reçu. Puis suivre la recette ci-dessous.
 
-Les accès au projet Cloudflare Pages **`minijeux`** et au compte Twilio Verify permettent à l'agent d'effectuer la liaison, la migration, le déploiement de prévisualisation et l'ajout des employés. L'exploitant fournit les comptes nominatifs, les décisions légales et les autorisations de dépenses; il n'a pas à écrire du SQL ou à modifier le code.
+## Recette du parcours client
 
-| Service | Réglage exact dans l'environnement **Preview** |
-|---|---|
-| Origine | `APP_ORIGIN=https://develop-noel-recompenses-v1.minijeux-4gy.pages.dev`, sans barre oblique finale. Utiliser cet alias pour les parties et leur confirmation. |
-| Base D1 | Base dédiée de prévisualisation, liaison **`DB`**; appliquer `migrations/0001_rewards.sql` et vérifier toutes les tables, colonnes et protections attendues. Ne pas charger de gagnants fictifs. |
-| Accès employés | Application Cloudflare Access couvrant `/admin*` et `/api/admin/*`, comptes individuels et authentification multifacteur; renseigner `ACCESS_TEAM_DOMAIN` et `ACCESS_AUD`. Ajouter les identités Access vérifiées à la liste D1 des employés actifs, avec nom et rôle `staff` ou `manager`. Protéger aussi les autres alias publiés. |
-| Turnstile | Widget autorisant l'hôte de prévisualisation; `TURNSTILE_SITE_KEY` public et `TURNSTILE_SECRET` serveur du même widget. Le serveur exige l'action `boreal-session`. |
-| Vérification SMS | `SMS_PROVIDER=twilio`; compte et service Verify réels, restrictions géographiques et protections contre la fraude adaptées. Secrets serveur : `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_VERIFY_SERVICE_SID`. |
-| Protection du registre | `REWARDS_HMAC_SECRET` aléatoire d'au moins 32 octets et 32 caractères. `SMS_CHALLENGE_SECRET` distinct d'au moins 32 octets facultatif. Conserver ces valeurs dans les secrets Cloudflare. |
-| Coût SMS | Choisir explicitement `SMS_DAILY_LIMIT` entre `1` et `100`, après approbation des coûts. Ce quota inclut les emplacements réservés et suit le jour d'allocation à Toronto; il ne plafonne pas à lui seul la facturation du fournisseur. |
-| Autorisations | Garder `REWARDS_ENABLED=false`, `SMS_APPROVED=false` et `TERMS_APPROVED=false` pendant la préparation. Aucune valeur réelle n'a été inventée dans le dépôt. |
+- Ouvrir le jeu de Noël. Aucun nom ni téléphone demandé avant le départ.
+- Jouer une partie admissible avec les vrais contrôles. Le serveur rejoue les actions ; aucun score déclaré ne force un gain.
+- Après le palier admissible, saisir nom et téléphone autorisé, recevoir le SMS Verify et confirmer le code.
+- Essayer aussi le retour **Modifier mon numéro**, le renvoi après 60 secondes et une erreur de saisie. Score, réservation et échéance initiale doivent rester identiques ; l’ancienne vérification doit être refusée après une nouvelle demande. Maximum cinq demandes par partie.
+- Constater le code attribué et le second SMS contenant score, montant, code et conditions alimentaires. Vérifier dans D1 via l’administration le bénéficiaire, le montant, le budget et le statut.
+- Prendre le code en charge puis cocher **consommation pour l’essai Preview, sans rabais**. Aucun rabais à appliquer dans Lightspeed. Le code devient définitivement utilisé ; l’audit enregistre l’employé, la date et **0 $ réellement appliqué**. Une seconde utilisation doit échouer.
+- Tester séparément le gestionnaire : budget ce mois seulement/reconduit, bon manuel, confirmations et justifications des deux exceptions. Le SMS manuel ne contient aucun faux score.
 
-La relecture d'une partie peut dépasser la capacité CPU d'un environnement gratuit : les mesures locales sous Node sont de **14 à 28 ms**, et Cloudflare documente **10 ms de CPU par requête pour Workers Free** dans ses [limites officielles](https://developers.cloudflare.com/workers/platform/limits/). Il faut confirmer la limite réellement applicable aux Functions Pages et mesurer le Worker déployé, puis valider une capacité adaptée **avant d'ouvrir les gains**. Ces mesures Node ne prédisent pas exactement le temps Cloudflare. Aucun changement de forfait ni paiement ne doit être engagé sans accord.
+Un téléphone déjà gagnant depuis 30 jours est normalement bloqué. Pour répéter les tests, utiliser d’autres numéros autorisés ou le parcours manuel avec dérogation justifiée ; ne pas modifier les protections des joueurs ni effacer l’historique pour simuler un succès.
 
-## Ordre de mise en service
+## Avant le lancement officiel
 
-1. **Préparer uniquement Preview.** Avec les accès autorisés, l'agent configure les services du tableau, applique le schéma D1, ajoute les employés et publie la branche existante. Les trois autorisations restent à `false`. Après toute modification des liaisons ou variables Cloudflare, redéployer la prévisualisation. Le jeu doit rester jouable sans gain et l'administration doit refuser un visiteur anonyme.
-2. **Constater la liaison réelle.** Un responsable connecté ouvre [le diagnostic privé](https://develop-noel-recompenses-v1.minijeux-4gy.pages.dev/api/admin/setup). Il faut obtenir `database.connected=true`, `database.schemaReady=true` et des listes d'éléments manquants vides. Dans `configuration`, `originConfigured`, `hmacConfigured`, `turnstileConfigured` et `smsProviderConfigured` doivent être vrais. Les approbations, `smsConfigured` et `rewardsConfigured` restent faux pendant cette préparation. Le diagnostic ne révèle aucun secret; `providerVerification: "not_performed"` signifie que Turnstile et Twilio n'ont pas été testés. Il ne prouve ni l'envoi d'un SMS ni l'attribution d'un code.
-3. **Finaliser le règlement public.** Confirmer les [renseignements indispensables](RENSEIGNEMENTS-LEGAUX.md), les publier dans le règlement et appliquer les modalités de confidentialité décidées. L'approbation humaine se traduit ensuite par `TERMS_APPROVED=true`. Confirmer aussi la capacité CPU et les coûts SMS avant `SMS_APPROVED=true`. Garder `REWARDS_ENABLED=false` jusqu'à l'accord d'ouverture.
-4. **Valider le parcours réel autorisé en Preview.** Après accord explicite pour les SMS et les véritables gains de cet essai, passer `REWARDS_ENABLED=true`, redéployer et contrôler le diagnostic. Effectuer un départ avec Turnstile réel, une partie admissible et une confirmation SMS réelle. Vérifier que le code apparaît dans le registre D1 via l'administration, que le budget est débité une seule fois et que la confirmation se retrouve dans le navigateur du joueur. Cet essai attribue une vraie récompense et consomme du quota; il n'existe pas de mode de faux gain. Ne marquer un code comme utilisé qu'au moment d'une vraie remise suivant la [procédure employés](PROCEDURE-EMPLOYES.md).
-5. **Faire valider la prévisualisation.** Conserver la preuve du déploiement, du diagnostic, du parcours réel et des limites de fonctionnement. Une configuration complète ne suffit pas à déclarer les services testés. Suspendre les nouveaux gains si un contrôle essentiel échoue; les bons déjà attribués restent des engagements à traiter.
-6. **Publier seulement après l'autorisation du propriétaire.** Préparer les paramètres et la D1 de production, les comptes Access et les clés autorisées pour l'hôte `minijeux-4gy.pages.dev`; `APP_ORIGIN` devient exactement `https://minijeux-4gy.pages.dev`. Garder les trois autorisations à `false` pendant cette préparation et ne pas transférer de données d'essai. Après autorisation de publication et vérification en production, appliquer les approbations puis `REWARDS_ENABLED=true` en dernier. Le personnel utilise alors l'adresse d'administration de production du tableau.
+Conserver les données Preview séparées, sans transférer ses codes dans Production. Après validation réglementaire, recette complète et autorisation explicite de publication, préparer la base Production sans données d’essai. Dans son administration, régler **100 $**, portée **ce mois-ci et les suivants**, puis vérifier le montant récurrent. Ne pas effacer les dépenses réelles pour forcer un solde.
 
-Les dates de début et de fin de la promotion doivent correspondre à l'ouverture et à la fermeture effectivement opérées : aucun calendrier automatique de campagne n'est configuré. Le contrôle de répétition repose sur un numéro vérifié, sans prouver l'identité d'une personne; la procédure de contestation doit en tenir compte.
+`PREVIEW_TEST_REDEMPTION` doit être désactivé et absent en Production ; le serveur refuse ce parcours sur l’adresse Production. Le personnel utilisera alors la [procédure alimentaire réelle](PROCEDURE-EMPLOYES.md). Aucune publication ni activation de production n’est autorisée par ce document.
 
-## Fichiers réellement publiés
-
-Le dossier de publication Cloudflare Pages est **`v3`**. Modifier puis tester ces fichiers, et reconstruire le Worker après un changement serveur ou du moteur partagé.
-
-| Fonction | Source utilisée |
-|---|---|
-| Jeu et menu de Noël | `v3/index.html`, `v3/menu-recompenses.js`; Jacques, décors et animations dans les modules et `v3/assets/` existants |
-| Partie validée et SMS | `v3/rewards-client.js`, moteur partagé `v3/game-session-engine.mjs` |
-| Règlement et confidentialité | `v3/reglement.html` |
-| Administration | `v3/admin/index.html`, `v3/admin/admin.js`, `v3/admin/admin.css` |
-| API, sécurité et données | `server/api.mjs`, `server/store.mjs`, `server/auth.mjs`, `server/sms.mjs`, `server/setup.mjs`, `server/common.mjs`; entrées `functions/[[path]].js` et `functions/_middleware.js` |
-| Worker publié | `v3/_worker.js`, produit par `npm run build:pages`; routage `v3/_routes.json` et en-têtes `v3/_headers` |
-| Schéma et exemple de configuration | `migrations/0001_rewards.sql`, `wrangler.preview.example.jsonc` — exemple à compléter, pas une configuration déjà appliquée |
-
-Les anciens fichiers autonomes et les documents d'architecture historiques ne constituent pas le système de récompenses déployable. Les détails du contrat serveur figurent dans [API et paramètres](API-RECOMPENSES.md).
+La limite CPU Cloudflare applicable à la relecture doit aussi être mesurée en Preview avant ouverture. Un test Node ou workerd local ne mesure pas le quota CPU du compte hébergé. Les accès Cloudflare/Twilio manquent à l’environnement de développement actuel ; aucun SMS réel ni liaison distante n’est donc déclaré vérifié.

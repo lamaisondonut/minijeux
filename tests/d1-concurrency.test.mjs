@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { isMainThread, parentPort, Worker, workerData } from 'node:worker_threads';
 import test from 'node:test';
 import { openReviewDatabase } from './helpers/review-d1.mjs';
+import { migrateSqlite } from './helpers/migrations.cjs';
 import { award, cleanup, reserveSmsQuota, reserveSmsSend, startSession } from '../server/store.mjs';
 import { handleRequest } from '../server/api.mjs';
 import { POLICY_VERSION, secureId, torontoDay } from '../server/common.mjs';
@@ -66,7 +67,7 @@ if (!isMainThread) {
     const file = join(directory, 'rewards.sqlite');
     const database = openReviewDatabase(file);
     database.sqlite.exec('PRAGMA journal_mode=WAL;');
-    database.sqlite.exec(readFileSync(new URL('../migrations/0001_rewards.sql', import.meta.url), 'utf8'));
+    migrateSqlite(database.sqlite);
     return { ...database, file, close() { database.sqlite.close(); rmSync(directory, { recursive: true, force: true }); } };
   }
 
@@ -253,7 +254,7 @@ if (!isMainThread) {
     } finally { f.close(); }
   });
 
-  test('24 authenticated claim requests use the code once and lock issuance to that employee', async () => {
+  test('24 authenticated staff race to claim a discount; only its claimant can confirm one manual use', async () => {
     const f = fixture();
     try {
       const now = Date.now();
@@ -280,17 +281,23 @@ if (!isMainThread) {
       const originalFetch = globalThis.fetch;
       globalThis.fetch = async () => Response.json({ keys: [jwk] });
       try {
-        const issue = async index => handleRequest(request(`/api/admin/rewards/${reward.id}/issue`, { lightspeedRef: 'LS-UNIQUE' },
+        const use = async (index, body = { discountApplied: true, foodOnlyConfirmed:true, eligibleFoodCents:2000 }) => handleRequest(request(`/api/admin/rewards/${reward.id}/use`, body,
           { 'Cf-Access-Jwt-Assertion': tokens[index] }), { ...baseEnv, DB: f.DB });
-        assert.equal((await issue((winner + 1) % 24)).status, 409);
-        assert.equal((await issue(winner)).status, 200);
-        assert.equal((await issue(winner)).status, 200);
+        assert.equal((await use(winner, { discountApplied: false })).status, 400);
+        assert.equal((await use((winner + 1) % 24)).status, 409);
+        assert.equal((await use(winner)).status, 200);
+        assert.equal((await use(winner)).status, 200);
       } finally { globalThis.fetch = originalFetch; }
       assert.equal(f.sqlite.prepare("SELECT count(*) AS n FROM audit WHERE action='issued'").get().n, 1);
       const issued = f.sqlite.prepare('SELECT * FROM rewards').get();
       assert.equal(issued.issued_by, claimed.claimed_by);
       assert.equal(issued.claimed_by_name, `Employee ${winner}`);
       assert.equal(issued.issued_by_name, `Employee ${winner}`);
+      assert.equal(issued.discount_applied, 1);
+      assert.equal(issued.lightspeed_ref, null);
+      assert.deepEqual(JSON.parse(f.sqlite.prepare("SELECT details FROM audit WHERE reward_id=? AND action='issued'").get(reward.id).details), {
+        valueCents: reward.value_cents, previewTestConsumed:false,discountApplied: true, foodOnlyConfirmed:true,eligibleFoodCents:2000,appliedValueCents:2000,unusedCents:0,reason: null,
+      });
     } finally { f.close(); }
   });
 
@@ -302,8 +309,10 @@ if (!isMainThread) {
       const phoneHash = await privateHmac(baseEnv, 'phone', phone);
       const run = await eligible(f, now, { ownerHash, phoneHash });
       const challengeId = secureId(), providerSid = `VE${'3'.repeat(32)}`;
-      f.sqlite.prepare("INSERT INTO challenges(id,owner_hash,session_id,phone_hash,created_at,expires_at,state,provider_sid,consent_version,first_name,last_name) VALUES(?,?,?,?,?,?,'pending',?,?, 'Test','Player')")
+      f.sqlite.prepare("INSERT INTO challenges(id,owner_hash,session_id,phone_hash,created_at,expires_at,state,provider_sid,consent_version,first_name,last_name,revision) VALUES(?,?,?,?,?,?,'pending',?,?, 'Test','Player',1)")
         .run(challengeId, ownerHash, run.sessionId, phoneHash, now, now + 600000, providerSid, POLICY_VERSION);
+      f.sqlite.prepare('UPDATE sessions SET active_challenge_id=?,verification_revision=1,verification_send_count=1 WHERE id=?').run(challengeId,run.sessionId);
+      f.sqlite.prepare('UPDATE challenges SET state=state WHERE id=?').run(challengeId);
       const token = await signChallenge(baseEnv, { challengeId, ownerHash, sessionId: run.sessionId, phoneHash, expiresAt: Math.floor((now + 600000) / 1000) });
       const args = { path: '/api/rewards/sms/verify', body: { challengeId: token, phone, code: '000000' },
         headers: { Cookie: `__Host-rewards-owner=${rawOwner}`, 'CF-Connecting-IP': '192.0.2.10' } };
@@ -348,8 +357,9 @@ if (!isMainThread) {
         const phoneHash = await privateHmac(baseEnv, 'phone', phone);
         hashes.push(phoneHash);
         const challengeId = secureId(), providerSid = `VE${String(index + 3).repeat(32)}`;
-        f.sqlite.prepare("INSERT INTO challenges(id,owner_hash,session_id,phone_hash,created_at,expires_at,state,provider_sid,consent_version,first_name,last_name) VALUES(?,?,?,?,?,?,'pending',?,?,?, 'Player')")
-          .run(challengeId, ownerHash, run.sessionId, phoneHash, now, now + 600000, providerSid, POLICY_VERSION, `Phone ${index}`);
+        f.sqlite.prepare("INSERT INTO challenges(id,owner_hash,session_id,phone_hash,created_at,expires_at,state,provider_sid,consent_version,first_name,last_name,revision) VALUES(?,?,?,?,?,?,'pending',?,?,?, 'Player',?)")
+          .run(challengeId, ownerHash, run.sessionId, phoneHash, now, now + 600000, providerSid, POLICY_VERSION, `Phone ${index}`,index+1);
+        f.sqlite.prepare('UPDATE sessions SET active_challenge_id=?,verification_revision=verification_revision+1,verification_send_count=verification_send_count+1 WHERE id=?').run(challengeId,run.sessionId);
         const token = await signChallenge(baseEnv, { challengeId, ownerHash, sessionId: run.sessionId, phoneHash,
           expiresAt: Math.floor((now + 600000) / 1000) });
         operations.push({ operation: 'api', args: { path: '/api/rewards/sms/verify',

@@ -4,6 +4,14 @@ import { smsConfiguration, normalizePhone, privateHmac, signChallenge, verifyCha
 import { ApiError, POLICY_VERSION, TIERS, TTL, secureId, json, iso, originConfigured, csrf, readJson, validId, string, dimensions, ownerCookie, cookie, monthWindow, scoreValue, publicRewardView, rewardView, torontoDay } from "./common.mjs";
 import { stmt, cleanup, rateLimit, startSession, award, reserveSmsQuota, reserveSmsSend } from "./store.mjs";
 import { setupDiagnostics, rewardDatabaseReady } from "./setup.mjs";
+import { previewTestRedemption } from "./preview-test.mjs";
+import { sendRewardSms } from "./notification-sms.mjs";
+import { quoteManual, createManual } from "./manual-rewards.mjs";
+import { getBudget, changeBudget } from "./budget.mjs";
+async function notifyInitial(env,reward,phone,actor) {
+  try {return await sendRewardSms(env,{reward,phone,actor,requestId:'initial_'+reward.id,kind:'initial'});}
+  catch {return {status:'unavailable'};}
+}
 function ready(env) {
   return !!(Number.isInteger(Number(env.SMS_DAILY_LIMIT)) && Number(env.SMS_DAILY_LIMIT) >= 1 && Number(env.SMS_DAILY_LIMIT) <= 100 && env.DB && originConfigured(env) && typeof env.REWARDS_HMAC_SECRET === "string" && env.REWARDS_HMAC_SECRET.length >= 32 && typeof env.TURNSTILE_SECRET === "string" && env.TURNSTILE_SECRET.length >= 10 && typeof env.TURNSTILE_SITE_KEY === "string" && env.TURNSTILE_SITE_KEY.length >= 5 && smsConfiguration(env).enabled);
 }
@@ -43,8 +51,8 @@ async function publicStatus(env, now) {
   try {
     if (!await rewardDatabaseReady(env.DB)) throw new ApiError(503, "schema_unavailable");
     await cleanup(env.DB, now);
-    const budget = await stmt(env.DB, "SELECT * FROM budgets WHERE month=?", w.month).first();
-    const remaining = 1e4 - (budget?.used_cents || 0) - (budget?.reserved_cents || 0);
+    const budget = await getBudget(env.DB, { month: w.month, now });
+    const remaining = budget.remainingCents;
     const cutoff = now >= w.end - TTL - 6e4;
     const cap = cutoff ? 0 : remaining >= 2e3 ? 2e3 : remaining >= 1e3 ? 1e3 : remaining >= 500 ? 500 : 0;
     const quota=await stmt(env.DB,"SELECT count+reserved total FROM sms_daily WHERE day=?",torontoDay(now)).first();
@@ -68,8 +76,8 @@ async function start(request, env, body, now) {
   if (existing) return json(sessionView(existing, body.expectedMode), 200, { "Set-Cookie": cookie(raw) });
   const w = monthWindow(now);
   const allow = now < w.end - TTL - 6e4;
-  const budget = await stmt(env.DB, "SELECT * FROM budgets WHERE month=?", w.month).first();
-  const potentiallyAvailable = allow && 1e4 - (budget?.used_cents || 0) - (budget?.reserved_cents || 0) >= 500;
+  const budget = await getBudget(env.DB, { month: w.month, now });
+  const potentiallyAvailable = allow && budget.remainingCents >= 500;
   const daily=await stmt(env.DB,"SELECT count+reserved total FROM sms_daily WHERE day=?",torontoDay(now)).first();
   if(potentiallyAvailable&&daily?.total>=Number(env.SMS_DAILY_LIMIT))throw new ApiError(503,"sms_daily_limit","Les récompenses sont temporairement indisponibles.");
   let verified = false;
@@ -128,20 +136,27 @@ async function smsRequest(request, env, body, now) {
   const phone = normalizePhone(body.phone);
   const phoneHash = await privateHmac(env, "phone", phone);
   const ip = await ipHash(request, env);
-  await rateLimit(env.DB, [{ key: `smsreq:o:${ownerHash}`, windowMs: 36e5, limit: 3 }, { key: `smsreq:p:${phoneHash}`, windowMs: 864e5, limit: 5 }, { key: `smsreq:i:${ip}`, windowMs: 36e5, limit: 10 }], now);
+  await rateLimit(env.DB, [{ key: `smsreq:o:${ownerHash}`, windowMs: 36e5, limit: 6 }, { key: `smsreq:p:${phoneHash}`, windowMs: 864e5, limit: 5 }, { key: `smsreq:i:${ip}`, windowMs: 36e5, limit: 10 }], now);
   const recent = await stmt(env.DB, "SELECT id FROM rewards WHERE phone_hash=? AND confirmed_at>? LIMIT 1", phoneHash, now - 30 * 864e5).first();
   if (recent) throw new ApiError(409, "phone_cooldown", "Un seul gain par t\xE9l\xE9phone v\xE9rifi\xE9 pendant 30 jours.");
-  if (s.bound_phone_hash && s.bound_phone_hash !== phoneHash) throw new ApiError(409, "phone_bound", "Cette partie est li\xE9e au premier t\xE9l\xE9phone v\xE9rifi\xE9.");
+  if(s.verification_send_count>=5)throw new ApiError(429,"sms_send_limit","La limite de cinq demandes pour cette partie est atteinte.");
+  if(s.verification_next_send_at>now){const error=new ApiError(429,"sms_wait","Attendez avant de demander un nouveau SMS.");error.retryAfter=Math.ceil((s.verification_next_send_at-now)/1000);throw error;}
   const id = secureId();
   const expiresAt = Math.min(now + 10 * 6e4, s.claim_deadline, s.expires_at);
-  await stmt(env.DB, "INSERT INTO challenges(id,owner_hash,session_id,phone_hash,created_at,expires_at,state,consent_version,first_name,last_name) VALUES(?,?,?,?,?,?,'sending',?,?,?)", id, ownerHash, s.id, phoneHash, now, expiresAt, POLICY_VERSION, firstName, lastName).run();
+  const revision=s.verification_revision+1;
+  const created=await env.DB.batch([
+    stmt(env.DB,"UPDATE sessions SET active_challenge_id=?,verification_revision=verification_revision+1,verification_send_count=verification_send_count+1,verification_next_send_at=?,bound_phone_hash=NULL WHERE id=? AND owner_hash=? AND state='eligible' AND reservation_active=1 AND expires_at>? AND claim_deadline>? AND verification_revision=? AND verification_send_count<5 AND verification_next_send_at<=? RETURNING id",id,now+60000,s.id,ownerHash,now,now,s.verification_revision,now),
+    stmt(env.DB,"UPDATE challenges SET state='failed',lease_until=NULL WHERE session_id=? AND id<>? AND EXISTS(SELECT 1 FROM sessions WHERE id=? AND active_challenge_id=? AND verification_revision=?)",s.id,id,s.id,id,revision),
+    stmt(env.DB,"INSERT INTO challenges(id,owner_hash,session_id,phone_hash,created_at,expires_at,state,consent_version,first_name,last_name,revision) SELECT ?,?,?,?,?,?,'sending',?,?,?,? WHERE EXISTS(SELECT 1 FROM sessions WHERE id=? AND active_challenge_id=? AND verification_revision=?)",id,ownerHash,s.id,phoneHash,now,expiresAt,POLICY_VERSION,firstName,lastName,revision,s.id,id,revision)
+  ]);
+  if(!created[0].results?.length)throw new ApiError(409,"verification_replaced","Une autre demande a modifié cette vérification. Rechargez l’écran de saisie.");
   const day = torontoDay(now);
   const quota = await reserveSmsSend(env.DB,{sessionId:s.id,ownerHash,dispatchDay:day,limit:Number(env.SMS_DAILY_LIMIT),now:Date.now()});
   if (!quota) {
     await stmt(env.DB, "UPDATE challenges SET state='failed' WHERE id=?", id).run();
     throw new ApiError(429, "sms_daily_limit", "La limite quotidienne de v\xE9rifications est atteinte.");
   }
-  await stmt(env.DB, "INSERT INTO audit(action,actor_sub,actor_name,created_at,details) VALUES('sms_requested',?,'Joueur',?,?)", ownerHash, now,JSON.stringify({sessionId:s.id,allocationDay:quota.day,reservedSlot:quota.reserved})).run();
+  await stmt(env.DB, "INSERT INTO audit(action,actor_sub,actor_name,created_at,details) VALUES('sms_requested',?,'Joueur',?,?)", ownerHash, now,JSON.stringify({sessionId:s.id,allocationDay:quota.day,reservedSlot:quota.reserved,verificationRevision:revision,replacedPrevious:Boolean(s.active_challenge_id),sendNumber:s.verification_send_count+1})).run();
   try {
     if(Date.now()>=expiresAt)throw new ApiError(410,"challenge_expired");
     const result = await requestVerification(env, phone);
@@ -151,7 +166,7 @@ async function smsRequest(request, env, body, now) {
     throw error;
   }
   const token = await signChallenge(env, { challengeId: id, ownerHash, sessionId: s.id, phoneHash, expiresAt: Math.floor(expiresAt / 1e3) });
-  return json({ challengeId: token, expiresAt: iso(expiresAt) });
+  return json({ challengeId: token, expiresAt: iso(expiresAt),nextSendAt:iso(now+60000),sendsRemaining:5-(s.verification_send_count+1),claimDeadline:iso(s.claim_deadline) });
 }
 async function smsVerify(request, env, body, now) {
   if (!ready(env)) throw new ApiError(503, "configuration_pending");
@@ -167,8 +182,9 @@ async function smsVerify(request, env, body, now) {
   const existing = await stmt(env.DB, "SELECT * FROM rewards WHERE session_id=?", s.id).first();
   if (existing) {
     if (existing.phone_hash !== phoneHash) throw new ApiError(409, "session_consumed");
-    return json({ awarded: true, score: s.score, reward: publicRewardView(existing, now) });
+    return json({ awarded: true, score: s.score, reward: publicRewardView(existing, now), notification:await notifyInitial(env,existing,phone,ownerHash) });
   }
+  if(s.active_challenge_id!==c.id || s.verification_revision!==c.revision)throw new ApiError(409,"verification_replaced","Cette vérification a été remplacée. Utilisez le dernier SMS demandé.");
   if (s.state !== "eligible" || !s.reservation_active || s.expires_at <= now || s.claim_deadline <= now) throw new ApiError(409, "session_not_eligible");
   if (s.bound_phone_hash && s.bound_phone_hash !== phoneHash) throw new ApiError(409, "phone_bound");
   const ip = await ipHash(request, env);
@@ -188,11 +204,9 @@ async function smsVerify(request, env, body, now) {
   }
   const completionNow = Date.now();
   if (completionNow >= s.expires_at || completionNow >= s.claim_deadline || completionNow >= c.expires_at) throw new ApiError(410, "challenge_expired");
-  await stmt(env.DB, "UPDATE sessions SET bound_phone_hash=?,first_name=?,last_name=? WHERE id=? AND owner_hash=? AND state='eligible' AND (bound_phone_hash IS NULL OR bound_phone_hash=?) AND expires_at>? AND claim_deadline>?", phoneHash, c.first_name, c.last_name, s.id, ownerHash, phoneHash, completionNow, completionNow).run();
-  const names = await stmt(env.DB, "SELECT first_name,last_name FROM sessions WHERE id=?", s.id).first();
-  if (!names.first_name || !names.last_name) throw new ApiError(409, "profile_missing");
-  const result = await award(env.DB, { sessionId: s.id, ownerHash, phoneHash, now: completionNow });
-  return json({ awarded: !!result.reward, score: s.score, ...result.reward ? { reward: publicRewardView(result.reward, completionNow) } : { reason: result.reason } });
+  const result = await award(env.DB, { sessionId:s.id,ownerHash,phoneHash,now:completionNow,challengeId:c.id,challengeRevision:c.revision,firstName:c.first_name,lastName:c.last_name });
+  if(!result.reward && result.reason==='session_unavailable')throw new ApiError(409,"verification_replaced","La vérification a changé ou son délai est écoulé. Utilisez la dernière demande.");
+  return json({ awarded: !!result.reward, score: s.score, ...result.reward ? { reward: publicRewardView(result.reward, completionNow), notification:await notifyInitial(env,result.reward,phone,ownerHash) } : { reason: result.reason } });
 }
 async function adminRate(request, env, employee, path, now) {
   const staff = await privateHmac(env, "staff", employee.sub);
@@ -217,13 +231,25 @@ async function adminApi(request, env, path, body, now, url) {
     return json(await setupDiagnostics(env, now));
   }
   await adminRate(request, env, employee, path, now);
-  if (path === "/api/admin/me" && request.method === "GET") return json({ employee: { ...employee, subject: employee.sub } });
+  if (path === "/api/admin/me" && request.method === "GET") return json({ employee: { ...employee, subject: employee.sub },previewTestRedemption:previewTestRedemption(env) });
   if (path === "/api/admin/budget" && request.method === "GET") {
     await cleanup(env.DB, now);
     const { month } = monthWindow(now);
-    const b = await stmt(env.DB, "SELECT * FROM budgets WHERE month=?", month).first();
-    const counts = await stmt(env.DB, "SELECT COUNT(CASE WHEN status='pending' AND claim_by>? THEN 1 END) pending_count,COUNT(CASE WHEN status IN ('claimed','issued') THEN 1 END) used_count FROM rewards", now).first();
-    return json({ month, budgetCents: 10000, usedCents: b?.used_cents || 0, reservedCents: b?.reserved_cents || 0, remainingCents: 1e4 - (b?.used_cents || 0) - (b?.reserved_cents || 0), pendingCount: counts.pending_count, usedCount: counts.used_count, countScope: "all" });
+    return json(await getBudget(env.DB, { month, now }));
+  }
+  if (path === "/api/admin/budget" && request.method === "PATCH") {
+    if (employee.role !== "manager") throw new ApiError(403, "manager_required", "Seul un responsable peut modifier le budget.");
+    return json(await changeBudget(env.DB, employee, body));
+  }
+  if (path === "/api/admin/manual-rewards/quote" && request.method === "POST") {
+    if (!await rewardDatabaseReady(env.DB)) throw new ApiError(503,"schema_unavailable");
+    return json(await quoteManual(env,employee,body));
+  }
+  if (path === "/api/admin/manual-rewards" && request.method === "POST") {
+    if (!await rewardDatabaseReady(env.DB)) throw new ApiError(503,"schema_unavailable");
+    const result=await createManual(env,employee,body);
+    const row=await stmt(env.DB,"SELECT * FROM rewards WHERE id=?",result.reward.id).first();
+    return json({...result,notification:await notifyInitial(env,row,body.phone,employee.sub)});
   }
   if (path === "/api/admin/audit" && request.method === "GET") {
     const rewardId = url.searchParams.get("rewardId");
@@ -271,7 +297,7 @@ async function adminApi(request, env, path, body, now, url) {
         if (/^[\s]*[=+@\-\t\r]/.test(text)) text = "'" + text;
         return '"' + text.replaceAll('"', '""') + '"';
       };
-      const fields = ["id", "code", "score", "valueCents", "status", "firstName", "lastName", "confirmedAt", "claimBy", "claimedBy", "claimedByName", "claimedAt", "issuedBy", "issuedByName", "issuedAt", "cancelledByName", "cancelledAt", "lightspeedRef", "cancelReason"];
+      const fields = ["id", "code", "score", "valueCents", "status", "source", "discountApplied", "foodOnlyConfirmed", "eligibleFoodCents", "appliedValueCents", "unusedCents", "firstName", "lastName", "confirmedAt", "claimBy", "claimedBy", "claimedByName", "claimedAt", "issuedBy", "issuedByName", "issuedAt", "cancelledByName", "cancelledAt", "lightspeedRef", "cancelReason"];
       await stmt(env.DB, "INSERT INTO audit(action,actor_sub,actor_name,created_at,details) VALUES('export',?,?,?,?)", employee.sub, employee.name, now, JSON.stringify({ count: rows.length })).run();
       const csv = "\uFEFF" + [fields.map(escape).join(","), ...rows.map((r) => {
         const value = rewardView(r, now);
@@ -284,15 +310,29 @@ async function adminApi(request, env, path, body, now, url) {
     const last = page.at(-1);
     return json({ rewards: page.map((r) => rewardView(r, now)), ...more ? { nextCursor: `${last.confirmed_at}:${last.id}` } : {} });
   }
-  const match = path.match(/^\/api\/admin\/rewards\/([A-Za-z0-9_-]{20,128})\/(claim|issue|cancel)$/);
+  const match = path.match(/^\/api\/admin\/rewards\/([A-Za-z0-9_-]{20,128})\/(claim|use|issue|cancel|notify)$/);
   if (match && request.method === "POST") {
     const [, id, action] = match;
+    if (action === "notify") {
+      const reward=await stmt(env.DB,"SELECT * FROM rewards WHERE id=?",id).first();
+      if(!reward)throw new ApiError(404,"reward_not_found");
+      return json({notification:await sendRewardSms(env,{reward,phone:body.phone,actor:employee.sub,requestId:body.requestId})});
+    }
     let result;
     if (action === "claim") {
       result = await stmt(env.DB, "UPDATE rewards SET status='claimed',claimed_by=?,claimed_by_name=?,claimed_at=?,last_actor_sub=?,last_actor_name=? WHERE id=? AND status='pending' AND claim_by>? RETURNING *", employee.sub, employee.name, now, employee.sub, employee.name, id, now).first();
     } else if (action === "issue") {
-      const ref = string(body.lightspeedRef, "lightspeed_ref", 120);
-      result = await stmt(env.DB, "UPDATE rewards SET status='issued',issued_by=?,issued_by_name=?,issued_at=?,lightspeed_ref=?,last_actor_sub=?,last_actor_name=? WHERE id=? AND status='claimed' AND claimed_by=? RETURNING *", employee.sub, employee.name, now, ref, employee.sub, employee.name, id, employee.sub).first();
+      throw new ApiError(410, "manual_discount_confirmation_required", "Ce bon de rabais exige la confirmation de son application manuelle sur la facture.");
+    } else if (action === "use") {
+      if(body.previewTestConsumed===true){
+        if(!previewTestRedemption(env))throw new ApiError(403,"preview_test_forbidden","La consommation sans rabais est réservée aux essais Preview isolés.");
+        if(body.discountApplied===true)throw new ApiError(400,"test_discount_not_applied");
+        result=await stmt(env.DB,"UPDATE rewards SET status='issued',preview_test_consumed=1,issued_by=?,issued_by_name=?,issued_at=?,last_actor_sub=?,last_actor_name=? WHERE id=? AND status='claimed' AND claimed_by=? RETURNING *",employee.sub,employee.name,now,employee.sub,employee.name,id,employee.sub).first();
+      }else{
+      if (body.discountApplied !== true) throw new ApiError(400, "discount_confirmation_required", "Confirmez que le rabais a été appliqué manuellement sur la facture.");
+      if (body.foodOnlyConfirmed !== true || !Number.isSafeInteger(body.eligibleFoodCents) || body.eligibleFoodCents<=0) throw new ApiError(400,"food_confirmation_required","Confirmez la portion alimentaire admissible et l’absence de rabais sur les boissons alcooliques.");
+      result = await stmt(env.DB, "UPDATE rewards SET status='issued',discount_applied=1,food_only_confirmed=1,eligible_food_cents=?,applied_value_cents=MIN(value_cents,?),issued_by=?,issued_by_name=?,issued_at=?,last_actor_sub=?,last_actor_name=? WHERE id=? AND status='claimed' AND claimed_by=? AND discount_applied=0 RETURNING *", body.eligibleFoodCents,body.eligibleFoodCents,employee.sub, employee.name, now, employee.sub, employee.name, id, employee.sub).first();
+      }
     } else {
       if (employee.role !== "manager") throw new ApiError(403, "manager_required", "Seul un responsable peut annuler.");
       const reason = string(body.reason, "reason", 500);
@@ -301,8 +341,8 @@ async function adminApi(request, env, path, body, now, url) {
     if (!result) {
       const old = await stmt(env.DB, "SELECT * FROM rewards WHERE id=?", id).first();
       if (!old) throw new ApiError(404, "reward_not_found");
-      if (action === "claim" && old.status === "claimed" && old.claimed_by === employee.sub || action === "issue" && old.status === "issued" && old.issued_by === employee.sub && old.lightspeed_ref === body.lightspeedRef || action === "cancel" && old.status === "cancelled") return json({ reward: rewardView(old, now) });
-      throw new ApiError(409, "reward_conflict", "Ce bon a d\xE9j\xE0 \xE9t\xE9 trait\xE9, est expir\xE9 ou appartient \xE0 un autre employ\xE9.");
+      if (action === "claim" && old.status === "claimed" && old.claimed_by === employee.sub || action === "use" && old.status === "issued" && old.issued_by === employee.sub && (body.previewTestConsumed===true && previewTestRedemption(env) && old.preview_test_consumed===1 || body.previewTestConsumed!==true && old.discount_applied === 1 && old.food_only_confirmed === 1 && old.eligible_food_cents === body.eligibleFoodCents) || action === "cancel" && old.status === "cancelled") return json({ reward: rewardView(old, now) });
+      throw new ApiError(409, "reward_conflict", "Ce bon de rabais a déjà été traité, est expiré ou appartient à un autre employé.");
     }
     return json({ reward: rewardView(result, now) });
   }
@@ -322,6 +362,14 @@ async function handleRequest(request, env) {
       body = await readJson(request);
     }
     if (path.startsWith("/api/admin/")) return await adminApi(request, env, path, body, now, url);
+    if (path === "/api/rewards/notification" && request.method === "POST") {
+      const ownerHash=await owner(request,env);
+      if(!validId(body.rewardId))throw new ApiError(400,"invalid_reward");
+      const reward=await stmt(env.DB,"SELECT r.* FROM rewards r JOIN sessions s ON s.id=r.session_id WHERE r.id=? AND s.owner_hash=?",body.rewardId,ownerHash).first();
+      if(!reward)throw new ApiError(404,"reward_not_found");
+      await rateLimit(env.DB,[{key:'notify:o:'+ownerHash,windowMs:3600000,limit:6}],now);
+      return json({notification:await sendRewardSms(env,{reward,phone:body.phone,actor:ownerHash,requestId:body.requestId})});
+    }
     if (path === "/api/rewards/confirmation" && request.method === "GET") {
       if (typeof env.REWARDS_HMAC_SECRET !== "string" || env.REWARDS_HMAC_SECRET.length < 32) throw new ApiError(503, "configuration_pending");
       const ownerHash = await owner(request, env);
@@ -335,7 +383,7 @@ async function handleRequest(request, env) {
     if (path === "/api/rewards/sms/verify") return await smsVerify(request, env, body, now);
     throw new ApiError(404, "not_found");
   } catch (error) {
-    if (error.status) return json({ error: error.code || "request_failed", message: error.message }, error.status);
+    if (error.status) return json({ error: error.code || "request_failed", message: error.message,...error.retryAfter?{retryAfter:error.retryAfter}:{} }, error.status,error.retryAfter?{"Retry-After":String(error.retryAfter)}:{});
     console.error("Rewards request failed", error?.name || "Error");
     return json({ error: "service_unavailable", message: "Service temporairement indisponible." }, 503);
   }

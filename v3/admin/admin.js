@@ -5,8 +5,8 @@
   const money = new Intl.NumberFormat('fr-CA', { style: 'currency', currency: 'CAD' });
   const dateTime = new Intl.DateTimeFormat('fr-CA', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'America/Toronto' });
   const dateOnly = new Intl.DateTimeFormat('fr-CA', { dateStyle: 'medium', timeZone: 'America/Toronto' });
-  const labels = { pending: 'À utiliser', claimed: 'En cours de remise', issued: 'Carte remise', expired: 'Code expiré', cancelled: 'Annulé' };
-  const state = { employee: null, rewards: [], selected: null, cursor: null, listRequest: 0, auditRequest: 0, session: 0, busy: false, listBusy: false };
+  const labels = { pending: 'À utiliser', claimed: 'Pris en charge', issued: 'Déjà utilisé', expired: 'Code expiré', cancelled: 'Annulé' };
+  const state = { employee: null, rewards: [], selected: null, cursor: null, listRequest: 0, auditRequest: 0, session: 0, busy: false, listBusy: false, budget: null, budgetRequest: 0, budgetBusy: false, budgetDraft: null, budgetOperation: null };
 
   class ApiError extends Error {
     constructor(message, status = 0, code = '') { super(message); this.status = status; this.code = code; }
@@ -27,7 +27,7 @@
   function subject() { return state.employee && (state.employee.sub || state.employee.subject); }
   function claimDeadline(reward) { return reward.claimDeadline || reward.claimBy; }
   function ownClaim(reward) { return Boolean(subject() && reward.claimedBy === subject()); }
-  function badge(status) { return node('span', 'status-badge status-' + (Object.hasOwn(labels, status) ? status : 'unknown'), labels[status] || 'Statut à vérifier'); }
+  function badge(status, discountApplied = false) { return node('span', 'status-badge status-' + (Object.hasOwn(labels, status) ? status : 'unknown'), status === 'issued' && discountApplied ? 'Utilisé · rabais appliqué' : labels[status] || 'Statut à vérifier'); }
   function showNotice(message, error = false) {
     $('notification').textContent = message;
     $('notification').classList.toggle('error', error);
@@ -39,7 +39,12 @@
     const messages = {
       reward_not_found: 'CODE INTROUVABLE. Vérifiez le code présenté par le client.',
       reward_conflict: 'Ce code a déjà été utilisé, est expiré ou a changé de statut. Actualisez sa fiche.',
-      invalid_lightspeed_ref: 'Vérifiez la référence de la carte Lightspeed.',
+      discount_confirmation_required: 'Confirmez que le rabais a été appliqué sur la facture.',
+      invalid_budget: 'Saisissez un montant CAD valide, avec au plus deux décimales.',
+      budget_month_changed: 'Le mois a changé. Vérifiez le nouveau mois avant de recommencer.',
+      budget_conflict: 'Le budget a été modifié par un autre responsable. Vérifiez les montants actualisés.',
+      budget_below_committed: 'Le budget proposé est inférieur aux montants déjà attribués et réservés. Vérifiez le minimum actualisé.',
+      budget_request_conflict: 'Cette modification ne correspond plus à la demande initiale. Vérifiez les montants actualisés.',
       export_too_large: 'Choisissez un statut avant d’exporter les récompenses.'
     };
     return Object.hasOwn(messages, code) ? messages[code] : 'Le service est temporairement indisponible. Réessayez dans un instant.';
@@ -54,7 +59,7 @@
         headers: { Accept: 'application/json', ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...options.headers }
       });
     } catch (_) {
-      throw new ApiError('Connexion interrompue. Actualisez le registre pour vérifier le statut avant toute remise.');
+      throw new ApiError('Connexion interrompue. Actualisez pour vérifier l’état de l’opération.');
     }
     if (response.status === 401 || response.status === 403) {
       showAccess(response.status);
@@ -73,6 +78,10 @@
     state.rewards = [];
     state.selected = null;
     state.cursor = null;
+    state.budget = null; state.budgetDraft = null; state.budgetOperation = null; state.budgetBusy = false;
+    state.budgetRequest += 1;
+    $('budget-editor').hidden = true;
+    if ($('budget-dialog').open) $('budget-dialog').close();
     state.auditRequest += 1;
     $('reward-list').replaceChildren();
     $('audit-list').replaceChildren();
@@ -122,7 +131,7 @@
       const data = await api('/me');
       if (session !== state.session) return;
       if (!data.employee || !(data.employee.sub || data.employee.subject)) throw new ApiError('Votre compte doit être vérifié par votre responsable.');
-      state.employee = data.employee;
+      state.employee = data.employee;state.employee.previewTestRedemption=data.previewTestRedemption===true;
       $('employee-name').textContent = data.employee.name || data.employee.email || 'Compte employé';
       $('access-panel').hidden = true;
       $('admin-content').hidden = false;
@@ -131,32 +140,122 @@
     } catch (error) { if (error.status !== 401 && error.status !== 403) showAccess(0, error.message); }
   }
 
+  function validBudget(data) {
+    const integer = (value) => Number.isSafeInteger(value) && value >= 0;
+    return data && /^\d{4}-(0[1-9]|1[0-2])$/.test(data.month) &&
+      ['budgetCents', 'usedCents', 'reservedCents', 'remainingCents', 'pendingCount', 'usedCount', 'defaultBudgetCents', 'revision', 'defaultRevision', 'minimumBudgetCents', 'minimumFutureBudgetCents'].every((key) => integer(data[key])) &&
+      data.countScope === 'all' && data.remainingCents === Math.max(0, data.budgetCents - data.usedCents - data.reservedCents) &&
+      data.minimumBudgetCents === Math.max(0, data.usedCents + data.reservedCents - (data.authorizedExceptionalCents || 0)) && data.minimumFutureBudgetCents >= data.minimumBudgetCents;
+  }
+
+  function budgetMonth(month) {
+    return new Intl.DateTimeFormat('fr-CA', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(month + '-15T12:00:00Z'));
+  }
+
+  function renderBudgetEditor() {
+    const data = state.budget;
+    const visible = state.employee?.role === 'manager' && Boolean(data);
+    $('budget-editor').hidden = !visible;
+    $('budget-fields').disabled = !visible || state.budgetBusy || Boolean(state.budgetOperation);
+    $('budget-retry').hidden = !visible || !state.budgetOperation || state.budgetBusy;
+    if (!visible) return;
+    $('budget-future').textContent = 'Budget par défaut des mois suivants : ' + amount(data.defaultBudgetCents) + ' par mois.';
+    $('budget-commitments').textContent = 'Minimum engagé pour ' + budgetMonth(data.month) + ' : ' + amount(data.minimumBudgetCents) + '. Pour ce mois et les suivants : ' + amount(data.minimumFutureBudgetCents) + '.';
+    $('budget-updated').hidden = !data.updatedAt;
+    if (data.updatedAt) $('budget-updated').textContent = 'Dernière modification : ' + date(data.updatedAt) + (data.updatedByName ? ' · ' + data.updatedByName : '');
+    if (!state.budgetOperation && !state.budgetDraft) $('budget-amount').value = (data.budgetCents / 100).toFixed(2).replace('.', ',');
+  }
+
   async function loadBudget() {
     const session = state.session;
+    const request = ++state.budgetRequest;
+    state.budget = null;
+    renderBudgetEditor();
     $('budget-values').setAttribute('aria-busy', 'true');
     $('budget-error').hidden = true;
     try {
       const data = await api('/budget');
-      if (session !== state.session || !state.employee) return;
+      if (session !== state.session || request !== state.budgetRequest || !state.employee) return;
+      if (!validBudget(data)) throw new ApiError('Budget incomplet.');
+      state.budget = data;
       $('budget-total').textContent = amount(data.budgetCents);
       $('budget-remaining').textContent = amount(data.remainingCents);
       $('budget-used').textContent = amount(data.usedCents);
+      $('budget-overrun').hidden=!(data.overrunCents>0);$('budget-overrun').textContent='Dépassement actuel, réservations comprises : '+amount(data.overrunCents||0)+'. Autorisations exceptionnelles cumulées : '+amount(data.authorizedExceptionalCents||0)+'. Le plafond normal demeure inchangé.';
       $('budget-reserved').textContent = amount(data.reservedCents) + ' retenus pour les parties en cours. ';
       $('budget-reserved').hidden = !Number.isSafeInteger(data.reservedCents) || data.reservedCents <= 0;
       $('budget-pending').textContent = Number.isSafeInteger(data.pendingCount) ? String(data.pendingCount) : '—';
       $('budget-used-count').textContent = Number.isSafeInteger(data.usedCount) ? String(data.usedCount) : '—';
-      if (typeof data.month === 'string' && /^\d{4}-\d{2}$/.test(data.month)) {
-        const month = new Date(data.month + '-15T12:00:00Z');
-        $('budget-month').textContent = new Intl.DateTimeFormat('fr-CA', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(month);
-      } else $('budget-month').textContent = 'Mois en cours';
+      $('budget-month').textContent = budgetMonth(data.month);
+      renderBudgetEditor();
     } catch (error) {
-      if (session !== state.session) return;
+      if (session !== state.session || request !== state.budgetRequest) return;
       for (const id of ['budget-total', 'budget-remaining', 'budget-used', 'budget-pending', 'budget-used-count']) $(id).textContent = '—';
       $('budget-reserved').hidden = true;
       $('budget-month').textContent = 'Données indisponibles';
       $('budget-error').textContent = 'Le budget n’a pas pu être chargé. Utilisez « Actualiser » pour réessayer.';
       $('budget-error').hidden = false;
-    } finally { if (session === state.session) $('budget-values').setAttribute('aria-busy', 'false'); }
+    } finally { if (session === state.session && request === state.budgetRequest) $('budget-values').setAttribute('aria-busy', 'false'); }
+  }
+
+  function reviewBudget(event) {
+    event.preventDefault();
+    if (state.employee?.role !== 'manager' || !state.budget || state.budgetBusy || state.budgetOperation) return;
+    const input = $('budget-amount');
+    input.setCustomValidity('');
+    const value = input.value.trim();
+    const cents = /^(?:0|[1-9]\d*)(?:[,.]\d{1,2})?$/.test(value) ? Math.round(Number(value.replace(',', '.')) * 100) : NaN;
+    const scope = document.querySelector('input[name="budget-scope"]:checked')?.value;
+    const minimum = scope === 'current_and_future' ? state.budget.minimumFutureBudgetCents : state.budget.minimumBudgetCents;
+    if (!Number.isSafeInteger(cents) || cents < 0) input.setCustomValidity('Saisissez un montant CAD positif ou nul, avec au plus deux décimales.');
+    else if (cents < minimum) input.setCustomValidity('Le minimum déjà engagé est de ' + amount(minimum) + '.');
+    if (!$('budget-edit-form').reportValidity() || !['month_only', 'current_and_future'].includes(scope)) return;
+    const data = state.budget;
+    state.budgetDraft = { month: data.month, budgetCents: cents, scope, expectedRevision: data.revision, expectedDefaultRevision: data.defaultRevision, requestId: crypto.randomUUID() };
+    $('budget-confirmation-summary').textContent = budgetMonth(data.month) + ' : ' + amount(data.budgetCents) + ' → ' + amount(cents) + '. ' +
+      (scope === 'month_only' ? 'Ce mois-ci seulement. Le budget par défaut des mois suivants reste à ' + amount(data.defaultBudgetCents) + ' par mois.' : 'Ce mois-ci et les mois suivants. Le budget par défaut passe de ' + amount(data.defaultBudgetCents) + ' à ' + amount(cents) + ' par mois.') +
+      ' Minimum engagé pour cette portée : ' + amount(minimum) + '.';
+    $('budget-operation-error').hidden = true;
+    $('budget-dialog').showModal();
+  }
+
+  async function saveBudget(event) {
+    event?.preventDefault();
+    if (state.employee?.role !== 'manager' || state.budgetBusy || (!state.budgetOperation && !state.budgetDraft)) return;
+    state.budgetOperation ||= state.budgetDraft;
+    state.budgetDraft = null;
+    const operation = state.budgetOperation;
+    const session = state.session;
+    state.budgetBusy = true;
+    $('budget-confirm').disabled = true; $('budget-cancel').disabled = true;
+    $('budget-operation-error').hidden = true;
+    renderBudgetEditor();
+    try {
+      const data = await api('/budget', { method: 'PATCH', body: JSON.stringify(operation) });
+      if (session !== state.session || !state.employee) return;
+      if (!validBudget(data)) throw new ApiError('La modification n’a pas pu être confirmée.');
+      state.budgetOperation = null;
+      $('budget-dialog').close();
+      showNotice('Budget enregistré pour ' + budgetMonth(operation.month) + ' : ' + amount(operation.budgetCents) + (operation.scope === 'current_and_future' ? ', ainsi que pour les mois suivants.' : '. Les mois suivants conservent leur budget par défaut.'));
+      await loadBudget();
+    } catch (error) {
+      if (session !== state.session) return;
+      $('budget-dialog').close();
+      if (error.status >= 400 && error.status < 500 && error.status !== 429) {
+        state.budgetOperation = null;
+        await loadBudget();
+        $('budget-operation-error').textContent = error.message;
+      } else {
+        $('budget-operation-error').textContent = error.message + ' Le résultat est incertain. Réessayez la même modification pour vérifier son enregistrement.';
+      }
+      $('budget-operation-error').hidden = false;
+    } finally {
+      if (session === state.session) {
+        state.budgetBusy = false;
+        $('budget-confirm').disabled = false; $('budget-cancel').disabled = false;
+        renderBudgetEditor();
+      }
+    }
   }
 
   function listState(title, message, retry = false) {
@@ -237,7 +336,7 @@
       row.setAttribute('aria-pressed', String(Boolean(state.selected && state.selected.id === reward.id)));
       const customer = node('span', 'row-customer');
       customer.append(node('span', 'customer-name', name(reward)), node('span', 'row-code', reward.code));
-      row.append(customer, node('span', 'row-value', amount(reward.valueCents)), badge(reward.status));
+      row.append(customer, node('span', 'row-value', amount(reward.valueCents)), badge(reward.status, reward.discountApplied === true));
       row.addEventListener('click', () => selectReward(reward));
       list.append(row);
     }
@@ -259,25 +358,31 @@
     $('detail-empty').hidden = Boolean(reward);
     $('detail-content').hidden = !reward;
     if (!reward) return;
-    const statusBadge = badge(reward.status);
+    const statusBadge = badge(reward.status, reward.discountApplied === true);
     statusBadge.id = 'detail-status';
     $('detail-status').replaceWith(statusBadge);
     $('detail-name').textContent = name(reward);
     $('detail-code').textContent = reward.code || 'Code indisponible';
     $('detail-value').textContent = amount(reward.valueCents);
-    $('detail-validation').textContent = reward.status === 'claimed' || reward.status === 'issued' ? 'CODE DÉJÀ UTILISÉ' : reward.status === 'expired' ? 'CODE EXPIRÉ' : '';
+    $('detail-validation').textContent = reward.status === 'claimed' ? 'CODE PRIS EN CHARGE' : reward.status === 'issued' ? 'CODE DÉJÀ UTILISÉ' : reward.status === 'expired' ? 'CODE EXPIRÉ' : '';
     $('detail-validation').hidden = !$('detail-validation').textContent;
     $('detail-facts').replaceChildren();
     fact('Date d’attribution', date(reward.confirmedAt));
-    if (reward.score !== undefined) fact('Score', Number.isSafeInteger(reward.score) ? reward.score.toLocaleString('fr-CA') : 'Non renseigné');
+    fact('Origine',reward.source==='manual'?'Création manuelle par un gestionnaire':'Partie vérifiée');
+    if (reward.appliedValueCents!=null){fact('Rabais réellement appliqué',amount(reward.appliedValueCents));fact('Portion inutilisée perdue',amount(reward.unusedCents));}
+    if (reward.score !== undefined && reward.score !== null) fact('Score', Number.isSafeInteger(reward.score) ? reward.score.toLocaleString('fr-CA') : 'Non renseigné');
     fact('Code utilisable jusqu’au', date(claimDeadline(reward)));
-    if (reward.claimedAt) fact('Code utilisé le', date(reward.claimedAt));
+    if (reward.claimedAt) fact('Pris en charge le', date(reward.claimedAt));
     if (reward.claimedBy) fact('Employé responsable', ownClaim(reward) ? state.employee.name || state.employee.email : reward.claimedByName || reward.claimedBy);
-    if (reward.issuedAt) fact('Carte remise le', date(reward.issuedAt));
-    if (reward.lightspeedRef) fact('Référence Lightspeed', reward.lightspeedRef);
+    if (reward.issuedAt) fact(reward.discountApplied === true ? 'Rabais appliqué le' : 'Utilisation enregistrée le', date(reward.issuedAt));
+    if (reward.issuedByName) fact('Utilisation confirmée par', reward.issuedByName);
     renderAction();
   }
 
+  function notificationForm(reward) {
+    const form=node('form'),label=node('label','field','Téléphone du bénéficiaire pour renvoyer le code'),input=node('input'),send=node('button','button secondary','Renvoyer le SMS du code'),message=node('p');input.type='tel';input.required=true;label.append(input);send.type='submit';form.append(label,send,message);const requestId=crypto.randomUUID().replaceAll('-','');
+    form.addEventListener('submit',async e=>{e.preventDefault();send.disabled=true;try{const data=await api('/rewards/'+encodeURIComponent(reward.id)+'/notify',{method:'POST',body:JSON.stringify({phone:input.value,requestId})});message.textContent=data.notification.status==='accepted'?'SMS pris en charge par le fournisseur.':data.notification.status==='disabled'?'Envoi des SMS de récompense désactivé.':'Envoi non confirmé. Vérifiez les messages avant de recommencer.';}catch(error){message.textContent=error.message;}finally{send.disabled=false;}});return form;
+  }
   function renderAction() {
     const reward = state.selected;
     const container = $('detail-action');
@@ -285,38 +390,40 @@
     if (!reward) return;
     const block = node('div', 'action-block');
     if (reward.status === 'pending') {
-      block.append(node('h3', '', '1. Utiliser le code'), node('p', '', 'Vérifiez le montant avec le client, puis confirmez. Attendez la confirmation avant de créer sa carte dans Lightspeed.'));
-      const button = node('button', 'button primary', 'MARQUER COMME UTILISÉ');
+      block.append(node('h3', '', '1. Prendre en charge le code'), node('p', '', 'Vérifiez le montant avec le client, puis confirmez. Attendez la confirmation avant d’appliquer le rabais sur la facture.'));
+      const button = node('button', 'button primary', 'PRENDRE EN CHARGE');
       button.id = 'claim-button'; button.type = 'button'; button.disabled = state.busy;
       button.addEventListener('click', openClaimDialog);
       block.append(button);
     } else if (reward.status === 'claimed' && ownClaim(reward)) {
-      block.append(node('h3', '', '2. Créer et remettre la carte'), node('p', '', 'Vous avez utilisé ce code. Vérifiez d’abord si une carte a déjà été créée, puis créez manuellement une seule carte dans Lightspeed au montant indiqué.'));
-      const form = node('form'); form.id = 'issue-form';
-      const field = node('div', 'field');
-      const label = node('label', '', 'Référence de la carte Lightspeed'); label.htmlFor = 'lightspeed-ref';
-      const input = node('input'); input.type = 'text'; input.id = 'lightspeed-ref'; input.name = 'lightspeedRef'; input.required = true; input.maxLength = 120; input.autocomplete = 'off'; input.disabled = state.busy;
-      field.append(label, input);
+      block.append(node('h3', '', '2. Appliquer le rabais sur la facture'), node('p', '', 'Le code est pris en charge à votre nom. Vérifiez la facture, puis appliquez manuellement une seule fois le rabais de ' + amount(reward.valueCents) + ' dans la caisse du restaurant.'));
+      const form = node('form'); form.id = 'use-form';
       const checkLabel = node('label', 'checkbox-label');
-      const checkbox = node('input'); checkbox.type = 'checkbox'; checkbox.id = 'handover-confirm'; checkbox.required = true; checkbox.disabled = state.busy;
-      checkLabel.append(checkbox, node('span', '', 'J’ai remis au client une seule carte-cadeau du montant de ' + amount(reward.valueCents) + '.'));
-      const error = node('p', 'inline-error'); error.id = 'issue-error'; error.hidden = true; error.setAttribute('role', 'alert');
-      const submit = node('button', 'button primary', '3. Confirmer la carte remise'); submit.type = 'submit'; submit.id = 'issue-confirm'; submit.disabled = state.busy;
-      form.append(field, checkLabel, error, submit);
-      form.addEventListener('submit', confirmIssue);
+      const checkbox = node('input'); checkbox.type = 'checkbox'; checkbox.id = 'discount-confirm'; checkbox.required = true; checkbox.disabled = state.busy;
+      checkLabel.append(checkbox, node('span', '', 'Le rabais a été appliqué sur la facture.'));
+      const error = node('p', 'inline-error'); error.id = 'use-error'; error.hidden = true; error.setAttribute('role', 'alert');
+      const submit = node('button', 'button primary', '3. Confirmer le rabais appliqué'); submit.type = 'submit'; submit.id = 'use-confirm'; submit.disabled = state.busy;
+      const foodLabel=node('label','field','Valeur des aliments admissibles (CAD, hors boissons alcooliques)'),foodInput=node('input');foodInput.id='eligible-food-amount';foodInput.type='text';foodInput.inputMode='decimal';foodInput.required=true;foodInput.disabled=state.busy;foodLabel.append(foodInput);
+      const foodConfirmLabel=node('label','checkbox-label'),foodCheck=node('input');foodCheck.type='checkbox';foodCheck.id='food-only-confirm';foodCheck.required=true;foodCheck.disabled=state.busy;foodConfirmLabel.append(foodCheck,node('span','','Rabais applicable uniquement aux aliments. Aucun rabais direct ou indirect sur les boissons alcooliques.'));
+      const preview=node('p','','Indiquez la portion alimentaire avant d’appliquer le rabais dans Lightspeed.');
+      foodInput.addEventListener('input',()=>{const cents=moneyInput(foodInput.value);preview.textContent=cents>0?'Rabais à appliquer : '+amount(Math.min(cents,reward.valueCents))+'. Portion inutilisée perdue : '+amount(Math.max(0,reward.valueCents-cents))+'.':'Facture sans aliments admissibles : aucun rabais possible.';});
+      form.append(foodLabel,preview,foodConfirmLabel,checkLabel, error, submit);
+      if(state.employee.previewTestRedemption){foodInput.required=false;foodCheck.required=false;checkbox.required=false;form.replaceChildren(node('p','','Essai Preview : aucun rabais dans Lightspeed. La consommation définitive du code sera enregistrée comme un essai, sans attestation de rabais appliqué.'),checkLabel,error,submit);checkLabel.querySelector('span').textContent='Je confirme la consommation de ce code pour l’essai Preview, sans appliquer de rabais.';checkbox.required=true;}
+      form.addEventListener('submit', confirmUse);
       block.append(form);
     } else if (reward.status === 'claimed') {
-      block.append(node('h3', '', 'Remise déjà prise en charge'), node('p', '', 'Un autre employé a utilisé ce code et doit terminer la remise avec son compte. Ne créez pas de carte supplémentaire.'));
+      block.append(node('h3', '', 'Code déjà pris en charge'), node('p', '', 'Un autre employé a pris en charge ce code et doit terminer avec son compte. N’appliquez pas un deuxième rabais.'));
     } else if (reward.status === 'issued') {
-      block.append(node('h3', '', 'Carte remise et enregistrée'), node('p', '', 'Cette récompense a déjà été utilisée. Aucune autre carte ne doit être créée pour ce code.'));
+      block.append(node('h3', '', reward.discountApplied === true ? 'Rabais appliqué et enregistré' : 'Code déjà utilisé'), node('p', '', 'Cette récompense a déjà été utilisée. Aucun autre rabais ne doit être appliqué pour ce code.'));
     } else if (reward.status === 'expired') {
-      block.append(node('h3', '', 'La date limite du code est dépassée'), node('p', '', 'Cette récompense ne peut plus être utilisée. Cette date limite concerne le code, et non une carte-cadeau.'));
+      block.append(node('h3', '', 'La date limite du code est dépassée'), node('p', '', 'Cette récompense ne peut plus être utilisée. N’appliquez aucun rabais pour ce code.'));
     } else if (reward.status === 'cancelled') {
       block.append(node('h3', '', 'Récompense annulée'), node('p', '', reward.cancelReason || 'Cette récompense ne peut pas être utilisée.'));
     } else {
       block.append(node('h3', '', 'Vérification nécessaire'), node('p', '', 'Cette récompense nécessite une vérification. Actualisez le registre et contactez votre responsable.'));
     }
     container.append(block);
+    if(reward.status==='pending')container.append(notificationForm(reward));
   }
 
   async function loadAudit() {
@@ -332,10 +439,13 @@
       if (request !== state.auditRequest || session !== state.session || !state.selected || reward.id !== state.selected.id) return;
       const events = data.events || data.audit;
       if (!Array.isArray(events)) throw new ApiError('Historique incomplet.');
-      const actionLabels = { claimed: 'Code marqué comme utilisé', claim: 'Code marqué comme utilisé', reward_claimed: 'Code marqué comme utilisé', issued: 'Carte remise', issue: 'Carte remise', reward_issued: 'Carte remise', confirmed: 'Participation confirmée', reward_confirmed: 'Participation confirmée', cancelled: 'Récompense annulée', cancel: 'Récompense annulée', reward_cancelled: 'Récompense annulée' };
+      const actionLabels = { claimed: 'Code pris en charge', claim: 'Code pris en charge', reward_claimed: 'Code pris en charge', issued: 'Utilisation enregistrée', issue: 'Utilisation enregistrée', reward_issued: 'Utilisation enregistrée', used: 'Rabais appliqué sur la facture', discount_applied: 'Rabais appliqué sur la facture', confirmed: 'Récompense attribuée', reward_confirmed: 'Récompense attribuée', preview_test_used:'Code consommé pour essai Preview, aucun rabais appliqué', manual_confirmed:'Bon créé manuellement', reward_sms_requested:'SMS demandé', reward_sms_result:'Résultat de la demande SMS', cancelled: 'Récompense annulée', cancel: 'Récompense annulée', reward_cancelled: 'Récompense annulée' };
       for (const event of events) {
         const item = node('li');
-        item.append(node('span', 'audit-action', actionLabels[event.action] || 'Mise à jour de la récompense'), node('span', 'audit-meta', [date(event.createdAt), event.actorName || event.actor || event.actorSub].filter(Boolean).join(' · ')));
+        const action = event.action === 'issued' && (event.details?.discountApplied === true || reward.discountApplied === true) ? 'Rabais appliqué sur la facture' : actionLabels[event.action] || 'Mise à jour de la récompense';
+        item.append(node('span', 'audit-action', action), node('span', 'audit-meta', [date(event.createdAt), event.actorName || event.actor || event.actorSub, amount(event.details?.appliedValueCents??event.details?.valueCents??reward.valueCents)].filter(Boolean).join(' · ')));
+        for(const key of ['reason','budgetOverrideReason','cooldownOverrideReason'])if(event.details?.[key])item.append(node('p','',event.details[key]));
+        if(event.details?.exceptionalCents>0)item.append(node('p','','Montant exceptionnel : '+amount(event.details.exceptionalCents)));
         $('audit-list').append(item);
       }
       $('audit-state').hidden = events.length > 0;
@@ -356,7 +466,7 @@
   }
 
   function updateReward(reward) {
-    if (!reward || !reward.id) throw new ApiError('L’opération n’a pas pu être confirmée. Actualisez la fiche avant toute remise.');
+    if (!reward || !reward.id) throw new ApiError('L’opération n’a pas pu être confirmée. Actualisez la fiche avant d’appliquer un rabais.');
     state.selected = reward;
     const index = state.rewards.findIndex((item) => item.id === reward.id);
     if (index >= 0) state.rewards[index] = reward;
@@ -389,17 +499,17 @@
       const data = await api('/rewards/' + encodeURIComponent(reward.id) + '/claim', { method: 'POST', body: '{}' });
       if (session !== state.session || !state.employee) return;
       const updated = data.reward || data;
-      if (updated.status !== 'claimed' || !ownClaim(updated)) throw new ApiError('L’utilisation à votre nom n’a pas été confirmée. Actualisez la fiche avant toute remise.');
-      if (updated.id !== reward.id) throw new ApiError('La confirmation ne correspond pas au code choisi. Actualisez la fiche avant toute remise.');
+      if (updated.status !== 'claimed' || !ownClaim(updated)) throw new ApiError('La prise en charge à votre nom n’a pas été confirmée. Actualisez la fiche avant d’appliquer le rabais.');
+      if (updated.id !== reward.id) throw new ApiError('La confirmation ne correspond pas au code choisi. Actualisez la fiche avant d’appliquer le rabais.');
       updateReward(updated);
       $('claim-dialog').close();
-      showNotice('Code marqué comme utilisé à votre nom. Vous pouvez maintenant créer la carte dans Lightspeed, puis confirmer sa remise.');
+      showNotice('Code pris en charge à votre nom. Appliquez manuellement le rabais sur la facture, puis confirmez son application.');
       await Promise.allSettled([loadBudget(), loadAudit(), loadRewards()]);
     } catch (error) {
       if (session !== state.session) return;
       if (error.status === 409) {
         $('claim-dialog').close();
-        showNotice('Ce code a changé de statut ou a déjà été utilisé. La fiche est actualisée. Ne créez aucune carte avant de vérifier son statut.', true);
+        showNotice('Ce code a changé de statut ou a déjà été utilisé. La fiche est actualisée. N’appliquez aucun rabais avant de vérifier son statut.', true);
         await Promise.allSettled([loadRewards(), refreshSelected(reward), loadBudget()]);
       } else {
         $('claim-dialog-error').textContent = error.message;
@@ -409,50 +519,51 @@
       state.busy = false;
       $('claim-confirm').disabled = false;
       $('claim-cancel').disabled = false;
-      $('claim-confirm').textContent = 'Confirmer l’utilisation';
+      $('claim-confirm').textContent = 'Confirmer la prise en charge';
       if (state.selected) renderAction();
     }
   }
 
-  async function confirmIssue(event) {
+  function moneyInput(value){const s=String(value).trim();return /^(?:0|[1-9]\d*)(?:[,.]\d{1,2})?$/.test(s)?Math.round(Number(s.replace(',','.'))*100):NaN;}
+  async function confirmUse(event) {
     event.preventDefault();
     const reward = state.selected;
     const form = event.currentTarget;
     if (state.busy || !reward || reward.status !== 'claimed' || !ownClaim(reward) || !form.reportValidity()) return;
-    const reference = $('lightspeed-ref').value.trim();
-    if (!reference) { $('lightspeed-ref').setCustomValidity('Saisissez une référence Lightspeed.'); $('lightspeed-ref').reportValidity(); return; }
+    const testOnly=state.employee.previewTestRedemption===true;const eligibleFoodCents=testOnly?null:moneyInput($('eligible-food-amount').value);if(!testOnly&&(!Number.isSafeInteger(eligibleFoodCents)||eligibleFoodCents<=0)){$('use-error').textContent='Saisissez une portion alimentaire admissible positive.';$('use-error').hidden=false;return;}
     const session = state.session;
     state.busy = true;
     for (const control of form.elements) control.disabled = true;
-    $('issue-confirm').textContent = 'Enregistrement en cours…';
-    $('issue-error').hidden = true;
+    $('use-confirm').textContent = 'Enregistrement en cours…';
+    $('use-error').hidden = true;
     try {
-      const data = await api('/rewards/' + encodeURIComponent(reward.id) + '/issue', { method: 'POST', body: JSON.stringify({ lightspeedRef: reference }) });
+      const data = await api('/rewards/' + encodeURIComponent(reward.id) + '/use', { method: 'POST', body: JSON.stringify(testOnly?{previewTestConsumed:true}:{ discountApplied: true, foodOnlyConfirmed:true, eligibleFoodCents }) });
       if (session !== state.session || !state.employee) return;
       const updated = data.reward || data;
-      if (updated.status !== 'issued') throw new ApiError('La remise n’a pas été confirmée. Vérifiez le statut avant toute nouvelle action.');
+      if (updated.status !== 'issued' || (testOnly?updated.previewTestConsumed!==true:(updated.discountApplied !== true || updated.foodOnlyConfirmed !== true || updated.appliedValueCents !== Math.min(reward.valueCents,eligibleFoodCents))) || updated.issuedBy !== subject()) throw new ApiError('L’application du rabais n’a pas été confirmée. Vérifiez le statut avant toute nouvelle action.');
       if (updated.id !== reward.id) throw new ApiError('La confirmation ne correspond pas au code choisi. Actualisez la fiche avant toute nouvelle action.');
       updateReward(updated);
-      showNotice('La remise de la carte-cadeau est enregistrée. Ce code ne peut plus être utilisé.');
+      showNotice(testOnly?'Code consommé pour l’essai Preview. Aucun rabais appliqué dans Lightspeed.': 'L’application du rabais sur la facture est enregistrée. Ce code ne peut plus être utilisé.');
       await Promise.allSettled([loadBudget(), loadAudit(), loadRewards()]);
     } catch (error) {
       if (session !== state.session) return;
       if (error.status === 409) {
-        showNotice('La fiche a changé de statut. Elle est actualisée. Ne créez aucune carte supplémentaire ; vérifiez la remise déjà effectuée.', true);
+        showNotice('La fiche a changé de statut. Elle est actualisée. Vérifiez le rabais déjà appliqué et ne l’appliquez pas une deuxième fois.', true);
         await Promise.allSettled([loadRewards(), refreshSelected(reward), loadBudget()]);
-      } else if ($('issue-error')) {
-        $('issue-error').textContent = error.message + ' La carte a peut-être déjà été remise : vérifiez Lightspeed et ne créez pas de nouvelle carte.';
-        $('issue-error').hidden = false;
+      } else if ($('use-error')) {
+        $('use-error').textContent = error.message + ' Le rabais a peut-être déjà été enregistré : vérifiez la facture et ne l’appliquez pas une deuxième fois.';
+        $('use-error').hidden = false;
       }
     } finally {
       state.busy = false;
-      if (session === state.session && $('issue-form')) {
-        for (const control of $('issue-form').elements) control.disabled = false;
-        $('issue-confirm').textContent = '3. Confirmer la carte remise';
+      if (session === state.session && $('use-form')) {
+        for (const control of $('use-form').elements) control.disabled = false;
+        $('use-confirm').textContent = '3. Confirmer le rabais appliqué';
       }
     }
   }
 
+  document.addEventListener('boreal:admin-changed',()=>{loadRewards();loadBudget();});
   async function exportCsv() {
     const button = $('export-button');
     button.disabled = true;
@@ -509,11 +620,21 @@
   $('claim-form').addEventListener('submit', confirmClaim);
   $('claim-cancel').addEventListener('click', () => { if (!state.busy) $('claim-dialog').close(); });
   $('claim-dialog').addEventListener('cancel', (event) => { if (state.busy) event.preventDefault(); });
-  document.addEventListener('input', (event) => { if (event.target.id === 'lightspeed-ref') event.target.setCustomValidity(''); });
+  $('budget-edit-form').addEventListener('submit', reviewBudget);
+  $('budget-confirm-form').addEventListener('submit', saveBudget);
+  $('budget-retry').addEventListener('click', saveBudget);
+  $('budget-cancel').addEventListener('click', () => { if (!state.budgetBusy) { state.budgetDraft = null; $('budget-dialog').close(); } });
+  $('budget-dialog').addEventListener('cancel', (event) => { if (state.budgetBusy) event.preventDefault(); else state.budgetDraft = null; });
+  document.querySelectorAll('[data-budget-preset]').forEach((button) => button.addEventListener('click', () => { $('budget-amount').value = button.dataset.budgetPreset; $('budget-amount').setCustomValidity(''); }));
+  $('budget-amount').addEventListener('input', () => $('budget-amount').setCustomValidity(''));
+  document.querySelectorAll('input[name="budget-scope"]').forEach((input) => input.addEventListener('change', () => $('budget-amount').setCustomValidity('')));
   // Customer information stays in memory only; the server controls every state change.
   window.addEventListener('pagehide', () => {
     state.session += 1;
     state.employee = null; state.selected = null; state.rewards = [];
+    state.budget = null; state.budgetDraft = null; state.budgetOperation = null; state.budgetRequest += 1;
+    $('budget-editor').hidden = true;
+    if ($('budget-dialog').open) $('budget-dialog').close();
     $('reward-list').replaceChildren(); $('audit-list').replaceChildren();
     $('detail-name').textContent = ''; $('detail-code').textContent = ''; $('detail-value').textContent = '';
     $('detail-facts').replaceChildren(); $('detail-action').replaceChildren();

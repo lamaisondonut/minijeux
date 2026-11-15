@@ -1,37 +1,18 @@
-# Livraison de développement — 14 novembre 2026
+# Livraison de développement — 15 novembre 2026
 
-Code sauvegardé sur [`develop/noel-recompenses-v1`](https://github.com/lamaisondonut/minijeux/tree/develop/noel-recompenses-v1), depuis `edition-noel` / `080fe40`. [Pull request brouillon nº 1](https://github.com/lamaisondonut/minijeux/pull/1), sans fusion. La branche de production `livraison-v3` reste à `080fe40`.
+Branche : `develop/noel-budget-configurable`. Production `livraison-v3` inchangée ; aucune migration distante ni activation de gains.
 
-## Livré et vérifié
+La version prépare les bons de rabais **exclusivement alimentaires**, le budget configurable avec choix de portée, les émissions manuelles réservées au gestionnaire et leurs exceptions justifiées, la confirmation exclusive de l’application sur facture, le suivi des montants partiels et les SMS du bon distincts de Verify. Aucune API Lightspeed ni référence obligatoire.
 
-Menu sans logos, signature textuelle GOAT, règlement client, moteur partagé et relecture serveur, migrations D1, réservations atomiques du budget et d’un premier SMS, codes uniques, règle glissante de téléphone, administration privée, audit, CSV et procédure de remise Lightspeed manuelle. Les tests des récompenses et de Noël passent localement et dans GitHub Actions ; [détails](TESTS-RECOMPENSES.md).
+- [Analyse et paramètres manuels](AUDIT-BUDGET-CONFIGURABLE.md)
+- [Migrations SQL et ordre d’exécution](AUDIT-BUDGET-CONFIGURABLE.md#sql--fichiers-séparés-ordre-dexécution)
+- [Contrat API](API-RECOMPENSES.md)
+- [Procédure des employés](PROCEDURE-EMPLOYES.md)
+- [Tests et limites](TESTS-RECOMPENSES.md)
+- [Renseignements encore nécessaires avant l’ouverture](RENSEIGNEMENTS-LEGAUX.md)
 
-Le dossier à publier reste **`v3`**. Les sources Functions sont compilées dans `v3/_worker.js`, vérifié dans le véritable moteur Cloudflare local. L’ancien HTML autonome ne comprend pas ce backend.
+La Preview doit disposer d’une D1 distincte : la liaison Preview annoncée par l’exploitant pointe actuellement sur la même base que Production. Le nouveau schéma ne doit pas être appliqué à cette base de production pour préparer les essais.
 
-## Prévisualisation distante déployée
+`REWARDS_ENABLED=false`, `MANUAL_REWARDS_ENABLED=false`, `NOTIFICATION_SMS_ENABLED=false`, `SMS_APPROVED=false` et `TERMS_APPROVED=false`. Les restrictions alimentaires sont une mesure de prudence ; aucune garantie de conformité juridique. Validation RACJ et recette distante requises avant ouverture.
 
-Le correctif `6a9454e` supprime les couches Node injectées inutilement par la compilation. Cloudflare confirme désormais la publication réussie des fichiers et de la Function.
-
-- [Prévisualisation de la branche](https://develop-noel-recompenses-v1.minijeux-4gy.pages.dev/)
-- [Déploiement précis du correctif](https://796cd2d0.minijeux-4gy.pages.dev/)
-- [État Cloudflare du déploiement](https://dash.cloudflare.com/?to=/2d2a4ebb6477b2a2a128e12d87e36cd4/pages/view/minijeux/796cd2d0-d6e7-48c2-8de5-74174d4778f6)
-
-Le Worker exact charge sans recompilation sur sept configurations workerd, avec et sans Node. Le jeu et les routes privées ont été vérifiés dans le navigateur contre Pages/D1 local. L'accès HTTP direct à `*.pages.dev` depuis l'environnement de travail est bloqué par son proxy réseau ; la réussite distante est confirmée par le contrôle Cloudflare dans GitHub. Aucune navigation publique réussie n'est revendiquée depuis cet environnement.
-
-Les échecs initiaux sont conservés comme historique dans le [diagnostic du Worker](CORRECTIF-WORKER.md). Aucun changement manuel de `nodejs_compat` n'est nécessaire au fichier corrigé. La production reste inchangée.
-
-Pour essayer localement le menu et l’entraînement :
-
-```sh
-npm ci --ignore-scripts
-npm run build:pages
-npx wrangler pages dev v3 --port 8788
-```
-
-Ouvrir `http://localhost:8788/`. Sans services configurés, la réponse de statut est `pending`, le jeu n’offre aucun gain et `/admin/` reste fermé.
-
-## Avant les gains réels
-
-Suivre le [guide opérateur](ACTIVATION-RECOMPENSES.md) pour configurer une **D1 de prévisualisation**, les comptes employés nominatifs Access, Turnstile et les secrets serveur selon [le guide exact](RECOMPENSES-CLOUDFLARE.md). Faire approuver le fournisseur SMS et ses coûts, finaliser les règles, l’admissibilité, la confidentialité et la politique anti-abus. L’unicité technique d’un téléphone ne garantit pas l’unicité d’une personne.
-
-Le diagnostic privé `/api/admin/setup` permet au responsable de constater la liaison et le schéma D1 effectifs sans exposer de secrets. Il ne prouve pas à lui seul les services SMS. Les trois drapeaux d’approbation restent désactivés. La recette sur les vrais services de prévisualisation et l’approbation explicite du propriétaire restent nécessaires avant toute publication en production.
+La priorité est désormais la recette interne en Preview avec vrais SMS et codes, autorisée par le propriétaire. L’envoi réel et le contrôle de la D1 distante ne sont pas encore vérifiés faute d’accès aux comptes Cloudflare/Twilio. Voir le [parcours de recette](AUDIT-BUDGET-CONFIGURABLE.md#priorité-actuelle--recette-preview-avec-vrais-sms-et-codes), la correction du téléphone et la consommation sans fausse attestation de rabais.

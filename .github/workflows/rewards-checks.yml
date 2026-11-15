@@ -1,7 +1,7 @@
 name: Récompenses et administration
 on:
   push:
-    branches: ['develop/noel-recompenses-v1']
+    branches: ['develop/noel-recompenses-v1', 'develop/noel-budget-configurable']
   pull_request:
 permissions:
   contents: read
@@ -31,6 +31,8 @@ jobs:
           export CHROMIUM_PATH="$(node -p "require('playwright').chromium.executablePath()")"
           export BOREAL_SCREENSHOTS=1
           npm run test:rewards
+      - name: Configurable budget and reward transition proposals
+        run: npm run test:budget-proposals
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -179,7 +179,7 @@ const text = page => page.locator('#rewardClaim').innerText();
    await test.close();
   }
   {
-   let startBody,finishAttempts=0,verifyAttempts=0;
+   let startBody,finishAttempts=0,verifyAttempts=0,smsRequests=0;
    const finishBodies=[];
    const test=await open(browser,{name:'real winning replay and verified SMS',handle:async(pathname,body)=>{
     if(pathname==='/api/games/start'){startBody=body;return{body:{sessionId:'genuine-winning-session',seed:fixture.seed,mode:'rewards',engineVersion:ENGINE_VERSION,capCents:1000,expiresAt:new Date(Date.now()+1800000).toISOString(),policyVersion:'test-policy'}}}
@@ -191,7 +191,7 @@ const text = page => page.locator('#rewardClaim').innerText();
      return{body:{score:result.score,eligible:true,mode:'rewards',capCents:1000,claimDeadline:new Date(Date.now()+1800000).toISOString()}};
     }
     if(pathname==='/api/rewards/confirmation')return{body:{score:fixture.expectedScore,reward:{code:'BOREAL-TEST-VERIFIED',valueCents:1000,confirmedAt:new Date().toISOString(),claimBy:new Date(Date.now()+30*86400000).toISOString(),status:'claimed'}}};
-    if(pathname==='/api/rewards/sms/request')return{body:{challengeId:'test-sms-challenge'}};
+    if(pathname==='/api/rewards/sms/request'){smsRequests++;return{body:{challengeId:'test-sms-challenge-'+smsRequests,nextSendAt:new Date(Date.now()+1500).toISOString(),sendsRemaining:5-smsRequests}};}
     if(pathname==='/api/rewards/sms/verify'){
      verifyAttempts++;
      if(verifyAttempts===1)return{body:{awarded:false,score:fixture.expectedScore,reason:'invalid_code'}};
@@ -221,14 +221,25 @@ const text = page => page.locator('#rewardClaim').innerText();
    await page.locator('input[name=firstName]').fill('JacquesTest');await page.locator('input[name=lastName]').fill('BorealTest');await page.locator('input[name=phone]').fill('+15145551234');await page.locator('input[name=consent]').check();
    await page.getByRole('button',{name:'Recevoir mon code SMS'}).click();await page.locator('input[name=code]').waitFor();
    const sms=test.requests.find(r=>r.pathname==='/api/rewards/sms/request').body;
-   check(sms.sessionId==='genuine-winning-session'&&sms.phone==='+15145551234'&&sms.firstName==='JacquesTest'&&sms.lastName==='BorealTest'&&sms.consentVersion==='rewards-2026-11-v1','SMS identity and consent are requested only after the verified winning run');
+   check(sms.sessionId==='genuine-winning-session'&&sms.phone==='+15145551234'&&sms.firstName==='JacquesTest'&&sms.lastName==='BorealTest'&&sms.consentVersion==='discounts-food-2026-11-v2','SMS identity and consent are requested only after the verified winning run');
    check(await page.locator('.reward-code').count()===0,'requesting an SMS still does not confirm a gain');
+   await page.getByRole('button',{name:'Modifier mon numéro',exact:true}).click();
+   check(await page.locator('input[name=firstName]').inputValue()==='JacquesTest'&&await page.locator('input[name=phone]').inputValue()==='+15145551234','phone correction returns to prefilled identity without restarting the game');
+   await page.locator('input[name=phone]').fill('+15145551235');await page.getByRole('button',{name:/Recevoir mon code SMS/}).click();
+   await page.locator('input[name=code]').waitFor();
+   check(await page.getByRole('button',{name:/Renvoyer le code/}).isDisabled(),'verification resend waits for the server cooldown');
+   const previousCode=await page.locator('input[name=code]').elementHandle();
+   await page.getByRole('button',{name:'Renvoyer le code',exact:true}).click();
+   await page.waitForFunction(el=>!el.isConnected,previousCode);
+   await page.locator('input[name=code]').waitFor();
+   check(smsRequests===3&&test.requests.filter(r=>r.pathname==='/api/games/start').length===1&&finishBodies.length===2,'corrected and resent SMS preserve the same winning game and proof');
+   check(test.requests.filter(r=>r.pathname==='/api/rewards/sms/request').at(-1).body.phone==='+15145551235','resend uses the corrected phone number');
    await page.locator('input[name=code]').fill('123456');await page.getByRole('button',{name:'Confirmer mon gain'}).click();
    await page.getByText('Le code SMS est incorrect. Réessaie avec le code reçu.',{exact:true}).waitFor();
    check(await page.locator('.reward-code').count()===0&&await page.getByRole('button',{name:'Confirmer mon gain'}).isEnabled(),'unawarded server verification stays retryable without a code');
    await page.getByRole('button',{name:'Confirmer mon gain'}).click();await page.locator('.reward-code').waitFor();
    check(await page.locator('.reward-code').innerText()==='BOREAL-TEST-VERIFIED'&&(await text(page)).includes('Code à usage unique'),'code appears only after explicit server award with one-use terms');
-   check((await text(page)).includes('Le code n’est pas une carte-cadeau déjà émise')&&(await text(page)).includes('en personne aux Boréalistes'),'confirmed code is clearly a claim bon redeemed in person, not an issued gift card');
+   check((await text(page)).includes('Ce bon donne droit au rabais indiqué sur ta facture')&&(await text(page)).includes('en personne aux Boréalistes'),'confirmed code is a single-use discount applied in person to an invoice');
    const stored=await page.evaluate(()=>JSON.stringify({...localStorage,...sessionStorage}));
    check(!/15145551234|JacquesTest|BorealTest|123456|BOREAL-TEST-VERIFIED/.test(stored),'phone, names, SMS and award code are absent from browser storage');
    await page.getByRole('button',{name:'Voir le résultat',exact:true}).click();
@@ -237,7 +248,7 @@ const text = page => page.locator('#rewardClaim').innerText();
    await page.reload();await page.waitForFunction(()=>document.querySelector('#game').dataset.ready==='true'&&window.BorealRewards);await page.evaluate(()=>BorealRewardMenu.ready);
    check(test.requests.every(r=>r.pathname!=='/api/rewards/confirmation'),'page reload does not automatically look up identity or a confirmed code');
    await page.locator('#rewardRecover').click();await page.locator('.reward-code').waitFor();
-   check((await text(page)).includes('Ce code a déjà été présenté au restaurant.')&&!(await text(page)).includes('Code à usage unique'),'explicit server recovery reflects an already claimed code without presenting it as usable');
+   check((await text(page)).includes('Ce code est pris en charge par le personnel du restaurant.')&&!(await text(page)).includes('Code à usage unique'),'explicit server recovery reflects an already claimed code without presenting it as usable');
    await test.close();
   }
   {
