@@ -9,30 +9,45 @@ async function rateLimit(db, keys, now) {
   await stmt(db, "DELETE FROM rate_limits WHERE key IN (SELECT key FROM rate_limits WHERE window_start<? ORDER BY window_start LIMIT 100)", now - 48 * 36e5).run();
   if (result.some((r, i) => (r.results?.[0]?.count ?? Number.MAX_SAFE_INTEGER) > keys[i].limit)) throw new ApiError(429, "rate_limited", "Trop de tentatives. R\xE9essayez plus tard.");
 }
-async function startSession(db, { id, ownerHash, seed, width, height, engineVersion, month, now, expiresAt, allowRewards, quotaDay = null, quotaLimit = 0 }) {
-  if(allowRewards&&(!/^\d{4}-\d{2}-\d{2}$/.test(quotaDay||"")||!Number.isInteger(quotaLimit)||quotaLimit<1||quotaLimit>100))throw new ApiError(503,"sms_not_configured");
+async function startSession(db, { id, ownerHash, seed, width, height, engineVersion, month, now, expiresAt, allowRewards, quotaDay = null, quotaLimit = 0, phoneVerificationMode = "sms" }) {
+  if(!["sms","unverified"].includes(phoneVerificationMode))throw new ApiError(503,"invalid_phone_verification_mode");
+  if(phoneVerificationMode==="unverified"){quotaDay=null;quotaLimit=0;}
+  if(phoneVerificationMode==="sms"&&allowRewards&&(!/^\d{4}-\d{2}-\d{2}$/.test(quotaDay||"")||!Number.isInteger(quotaLimit)||quotaLimit<1||quotaLimit>100))throw new ApiError(503,"sms_not_configured");
   const result = await db.batch([
-    stmt(db, "INSERT OR IGNORE INTO budgets(month) VALUES(?)", month),
+    stmt(db, "INSERT INTO budgets(month,limit_cents) SELECT ?,default_monthly_limit_cents FROM reward_budget_settings WHERE id=1 ON CONFLICT(month) DO NOTHING", month),
     stmt(db,"INSERT OR IGNORE INTO sms_daily(day,count,reserved) SELECT ?,0,0 WHERE ? IS NOT NULL",quotaDay,quotaDay),
     stmt(db, "UPDATE sessions SET reservation_active=0,state='lost' WHERE reservation_active=1 AND (expires_at<=? OR (state='eligible' AND claim_deadline<=?))", now, now),
-    stmt(db, `INSERT INTO sessions(id,owner_hash,seed,width,height,mode,engine_version,month,cap_cents,created_at,expires_at,reservation_active,sms_day,sms_reserved)
- SELECT ?,?,?,?,?,CASE WHEN cap>0 THEN 'rewards' ELSE 'extreme' END,?,?,cap,?,?,CASE WHEN cap>0 THEN 1 ELSE 0 END,CASE WHEN cap>0 THEN ? ELSE NULL END,CASE WHEN cap>0 AND ? IS NOT NULL THEN 1 ELSE 0 END FROM
- (SELECT CASE WHEN ?=0 THEN 0 WHEN 10000-used_cents-reserved_cents>=2000 THEN 2000 WHEN 10000-used_cents-reserved_cents>=1000 THEN 1000 WHEN 10000-used_cents-reserved_cents>=500 THEN 500 ELSE 0 END cap FROM budgets WHERE month=?)
- WHERE NOT EXISTS(SELECT 1 FROM sessions WHERE owner_hash=? AND reservation_active=1 AND expires_at>?) AND (cap=0 OR ? IS NULL OR COALESCE((SELECT count+reserved FROM sms_daily WHERE day=?),0)<?) RETURNING *`, id, ownerHash, seed, width, height, engineVersion, month, now, expiresAt, quotaDay, quotaDay, allowRewards ? 1 : 0, month, ownerHash, now, quotaDay, quotaDay, quotaLimit)
+    stmt(db, `INSERT INTO sessions(id,owner_hash,seed,width,height,mode,engine_version,month,cap_cents,created_at,expires_at,reservation_active,sms_day,sms_reserved,phone_verification_mode)
+ SELECT ?,?,?,?,?,CASE WHEN cap>0 THEN 'rewards' ELSE 'extreme' END,?,?,cap,?,?,CASE WHEN cap>0 THEN 1 ELSE 0 END,CASE WHEN cap>0 THEN ? ELSE NULL END,CASE WHEN cap>0 AND ? IS NOT NULL THEN 1 ELSE 0 END,? FROM
+ (SELECT CASE WHEN ?=0 THEN 0 WHEN limit_cents-used_cents-reserved_cents>=2000 THEN 2000 WHEN limit_cents-used_cents-reserved_cents>=1000 THEN 1000 WHEN limit_cents-used_cents-reserved_cents>=500 THEN 500 ELSE 0 END cap FROM budgets WHERE month=?)
+ WHERE NOT EXISTS(SELECT 1 FROM sessions WHERE owner_hash=? AND reservation_active=1 AND expires_at>?) AND (cap=0 OR ? IS NULL OR COALESCE((SELECT count+reserved FROM sms_daily WHERE day=?),0)<?) RETURNING *`, id, ownerHash, seed, width, height, engineVersion, month, now, expiresAt, quotaDay, quotaDay, phoneVerificationMode, allowRewards ? 1 : 0, month, ownerHash, now, quotaDay, quotaDay, quotaLimit)
   ]);
   const row = result[3].results?.[0];
   if (!row && quotaDay) { const quota = await stmt(db,"SELECT count+reserved total FROM sms_daily WHERE day=?",quotaDay).first(); if(quota?.total>=quotaLimit)throw new ApiError(503,"sms_daily_limit","Les récompenses sont temporairement indisponibles."); }
   if (!row) throw new ApiError(409, "session_pending", "Terminez la partie ou la confirmation en cours.");
   return row;
 }
-async function award(db, { sessionId, ownerHash, phoneHash, now }) {
-  const id = secureId();
+async function award(db, { sessionId, ownerHash, phoneHash, now,challengeId=null,challengeRevision=null,firstName=null,lastName=null,id=secureId(),customer=null,unverifiedProfile=false }) {
   const code = "GOAT-"+Array.from(crypto.getRandomValues(new Uint8Array(16)),byte=>byte.toString(16).padStart(2,"0")).join("").toUpperCase();
   try {
-    await stmt(db, `INSERT INTO rewards(id,session_id,phone_hash,code,value_cents,month,first_name,last_name,score,confirmed_at,claim_by,last_actor_sub,last_actor_name)
- SELECT ?,s.id,?,?,MIN(s.cap_cents,CASE WHEN s.score>=10000 THEN 2000 WHEN s.score>=7500 THEN 1000 WHEN s.score>=5000 THEN 500 ELSE 0 END),s.month,s.first_name,s.last_name,s.score,?,?,?,'Joueur v\xE9rifi\xE9'
- FROM sessions s WHERE s.id=? AND s.owner_hash=? AND s.state='eligible' AND s.reservation_active=1 AND s.bound_phone_hash=? AND s.expires_at>? AND s.claim_deadline>?`, id, phoneHash, code, now, now + 30 * 864e5, ownerHash, sessionId, ownerHash, phoneHash, now, now).run();
+    const insertSql=`INSERT INTO rewards(id,session_id,phone_hash,code,value_cents,month,first_name,last_name,score,confirmed_at,claim_by,last_actor_sub,last_actor_name,phone_ciphertext,phone_last4,name_search,phone_verified,device_hash)
+ SELECT ?,s.id,?,?,MIN(s.cap_cents,CASE WHEN s.score>=10000 THEN 2000 WHEN s.score>=7500 THEN 1000 WHEN s.score>=5000 THEN 500 ELSE 0 END),s.month,s.first_name,s.last_name,s.score,?,?,?,CASE WHEN ?=1 THEN 'Téléphone déclaré, non vérifié' ELSE 'Joueur vérifié par SMS' END,?,?,?,?,?
+ FROM sessions s WHERE s.id=? AND s.owner_hash=? AND s.state='eligible' AND s.reservation_active=1 AND s.bound_phone_hash=? AND s.expires_at>? AND s.claim_deadline>?`;
+    const insertArgs=[id,phoneHash,code,now,now+30*864e5,ownerHash,unverifiedProfile?1:0,customer?.phoneCiphertext??null,customer?.phoneLast4??null,customer?.nameSearch??"",challengeId?1:unverifiedProfile?0:1,ownerHash,sessionId,ownerHash,phoneHash,now,now];
+    if(challengeId){
+      await db.batch([
+        stmt(db,"UPDATE sessions SET bound_phone_hash=?,first_name=?,last_name=? WHERE id=? AND owner_hash=? AND state='eligible' AND reservation_active=1 AND active_challenge_id=? AND verification_revision=? AND expires_at>? AND claim_deadline>? AND EXISTS(SELECT 1 FROM challenges WHERE id=? AND revision=? AND state='verified' AND phone_hash=?)",phoneHash,firstName,lastName,sessionId,ownerHash,challengeId,challengeRevision,now,now,challengeId,challengeRevision,phoneHash),
+        stmt(db,insertSql+" AND s.active_challenge_id=? AND s.verification_revision=? AND EXISTS(SELECT 1 FROM challenges WHERE id=? AND revision=? AND state='verified' AND phone_hash=?)",...insertArgs,challengeId,challengeRevision,challengeId,challengeRevision,phoneHash)
+      ]);
+    }else if(unverifiedProfile){
+      if(!customer?.phoneCiphertext)throw new ApiError(503,"customer_contact_unavailable");
+      await db.batch([
+        stmt(db,"UPDATE sessions SET bound_phone_hash=?,first_name=?,last_name=? WHERE id=? AND owner_hash=? AND state='eligible' AND reservation_active=1 AND phone_verification_mode='unverified' AND bound_phone_hash IS NULL AND expires_at>? AND claim_deadline>?",phoneHash,firstName,lastName,sessionId,ownerHash,now,now),
+        stmt(db,insertSql+" AND s.phone_verification_mode='unverified'",...insertArgs)
+      ]);
+    }else await stmt(db,insertSql,...insertArgs).run();
   } catch (error) {
+    if (String(error.message).includes("device_cooldown")) return { reason: "device_cooldown" };
     if (String(error.message).includes("phone_cooldown")) return { reason: "phone_cooldown" };
     if (String(error.message).includes("session_not_eligible")) return { reason: "session_unavailable" };
     throw error;

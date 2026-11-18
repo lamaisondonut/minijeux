@@ -109,6 +109,17 @@ export async function requireAdmin(request, env, options) {
   let employee;
   try {
     employee = await env.DB.prepare('SELECT sub,email,name,role,active FROM employees WHERE sub = ?').bind(identity.sub).first();
+    // The site owner may pre-authorize an employee by email before the first
+    // Access email-code login. No Cloudflare account or technical subject ID
+    // is required from restaurant staff. Uninvited emails remain forbidden.
+    if(!employee && typeof env.DB.batch==='function'){
+      const invitation='invite:'+identity.email;
+      await env.DB.batch([
+        env.DB.prepare("UPDATE employees SET sub=? WHERE sub=? AND lower(email)=? AND active=1 AND role IN ('staff','manager') AND NOT EXISTS(SELECT 1 FROM employees WHERE sub=?)").bind(identity.sub,invitation,identity.email,identity.sub),
+        env.DB.prepare("INSERT INTO audit(action,actor_sub,actor_name,created_at,details) SELECT 'employee_first_login',sub,name,?,json_object('email',email) FROM employees WHERE sub=? AND changes()=1").bind(Date.now(),identity.sub)
+      ]);
+      employee=await env.DB.prepare('SELECT sub,email,name,role,active FROM employees WHERE sub = ?').bind(identity.sub).first();
+    }
   } catch {
     throw new AuthError('Employee access is unavailable.', 503, 'admin_unavailable');
   }

@@ -6,16 +6,22 @@
   "compatibility_flags": ["no_nodejs_compat", "no_nodejs_compat_v2"],
   "d1_databases": [{
     "binding": "DB",
-    "database_name": "boreal-rewards-preview",
+    "database_name": "defi-boreal-recompenses-preview",
     "database_id": "REMPLACER_PAR_ID_D1_PREVISUALISATION",
     "migrations_dir": "./migrations"
   }],
   "vars": {
-    "REWARDS_ENABLED": "false",
+    "DEPLOYMENT_ENVIRONMENT": "preview",
+    "PREVIEW_TEST_REDEMPTION": "false",
+    "PHONE_VERIFICATION_MODE": "unverified",
+    "REWARDS_ENABLED": "true",
+    "MANUAL_REWARDS_ENABLED": "true",
+    "NOTIFICATION_SMS_ENABLED": "false",
+    "NOTIFICATION_SMS_DAILY_LIMIT": "10",
     "SMS_APPROVED": "false",
     "TERMS_APPROVED": "false",
     "SMS_PROVIDER": "twilio",
     "SMS_DAILY_LIMIT": "0",
-    "APP_ORIGIN": "https://develop-noel-recompenses-v1.minijeux-4gy.pages.dev"
+    "APP_ORIGIN": "https://develop-noel-budget-configur.minijeux-4gy.pages.dev"
   }
 }

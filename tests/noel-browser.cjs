@@ -418,8 +418,9 @@ const imageTracker=()=>{
   check(testErrors.length===0&&deterministicApiRequests.every(request=>request.pathname==='/api/rewards/status'),'aucune erreur JavaScript ni demande financière dans les scénarios déterministes');
   await deterministic.close();
 
-  const noelScripts=Array.from(sourceHTML.matchAll(/<script[^>]+src=["']([^"']*noel[^"']*)["']/gi),match=>match[1]);
+  const noelScripts=Array.from(sourceHTML.matchAll(/<script[^>]+src=["']([^"']*noel[^"']*)["']/gi),match=>match[1]).filter(script=>script!=='menu-noel-scene.js');
   check(noelScripts.length===5,'cinq modules visuels Noël chargés par le HTML livré');
+  check(sourceHTML.includes('<script src="menu-noel-scene.js"></script>'),'scène d’accueil décorative distincte du moteur chargée');
   const missingResources=[...noelScripts,'assets/noel/jacques-noel-atlas.png','assets/noel/jacques-noel-atlas.json','assets/noel/forest-panorama-noel.png','assets/noel/forest-landscape-noel.png','assets/noel/santa-sleigh-six-reindeer.png'];
   for(const [index,resource] of missingResources.entries()){
    const unavailable=await browser.newContext({viewport,isMobile:true,hasTouch:true});

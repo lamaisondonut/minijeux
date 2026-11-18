@@ -1,0 +1,159 @@
+/* Full-screen home only. The V3 game canvas and its dimensions are untouched. */
+:root{--boreal-dark:#2D351E;--boreal-olive:#666C37;--boreal-gold:#EFCD7A;--boreal-white:#FFFFFF}
+#home{position:fixed;inset:0;z-index:7;display:block;padding:0;isolation:isolate;background:#132b34;overflow:auto;overscroll-behavior:contain}
+#home.off{display:none}
+#home::before{content:"";position:fixed;inset:0;z-index:-2;background:linear-gradient(90deg,#0b211cdb 0%,#0b211c94 34%,#0b211c05 72%),linear-gradient(0deg,#0b211cce,transparent 35%),url('assets/noel/forest-landscape-noel.png') center 65%/cover no-repeat;image-rendering:pixelated;pointer-events:none}
+#home #boreal-home-art{position:absolute;inset:0;width:100%;height:100%;z-index:-1;pointer-events:none;touch-action:auto}
+#home .boreal-home-shell{position:relative;width:min(100%,1480px);max-width:none;min-height:100%;height:auto;margin:auto;padding:clamp(24px,4vh,48px) clamp(28px,5vw,88px) 22px;display:grid;grid-template-columns:minmax(370px,.95fr) minmax(0,1.2fr);grid-template-rows:auto 1fr auto;column-gap:clamp(32px,5vw,90px);row-gap:26px;align-self:auto;text-align:left;background:none;border:0;box-shadow:none;border-radius:0}
+#home .brand{position:static;inset:auto;grid-column:1/-1;font-size:14px;font-weight:850;letter-spacing:.23em;line-height:1.3;text-align:left;color:#f4eee5;text-shadow:0 2px 10px #0008}
+#home .boreal-home-copy{grid-column:1;grid-row:2;align-self:center;min-width:0;max-width:530px;padding:12px 0}
+#home .boreal-home-scene{grid-column:2;grid-row:2;min-width:0;min-height:380px;align-self:stretch;pointer-events:none}
+#home .noelEdition{display:inline-flex;align-items:center;gap:8px;margin:0 0 18px;padding:7px 12px;border:1px solid #efcd7a69;border-radius:4px;color:var(--boreal-gold);background:#142d2c7a;font-size:10px;letter-spacing:.19em}
+#home .noelEdition::before{content:"✦";font-size:12px}
+#home h1{font-size:clamp(45px,4.8vw,67px);line-height:1.03;letter-spacing:-.045em;max-width:100%;width:100%;margin:0 0 18px;transform:rotate(-2deg);transform-origin:left center;color:#fff9ed;text-shadow:3px 5px 0 #122e2bd9}
+#home h1 em{color:#eda6a0}
+#home p.boreal-home-intro,#home .tips{display:none}
+#home .tip{display:flex;align-items:center;gap:7px;padding:0;border:0;background:none;font-size:11px;line-height:1.25;color:#e6e8dc;text-align:left}
+#home .tip b{display:block;flex-shrink:0;font-size:21px;margin:0;filter:drop-shadow(0 2px 3px #0008)}
+#home .boreal-home-status{display:flex;flex-direction:column;gap:5px;margin:0 0 12px;max-width:450px;font-size:12px;line-height:1.45;text-shadow:0 1px 8px #061710}
+#home .boreal-home-status strong{font-size:12px;font-weight:800;color:var(--boreal-gold)}
+#home .boreal-home-status span{color:#efeee4}
+#home .boreal-home-prizes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:0 0 15px;max-width:450px}
+#home .boreal-home-prizes[hidden]{display:none}
+#home .boreal-home-prize{display:flex;flex-direction:column;justify-content:center;gap:3px;min-width:0;min-height:106px;padding:12px 6px;text-align:center;border:1px solid #efcd7a9c;border-radius:10px;background:linear-gradient(155deg,#415238e8,#132e28e8);box-shadow:0 5px 14px #05190f40}
+#home .boreal-home-prize strong{font-size:37px;line-height:1.08;font-weight:900;color:#ffe4a2;letter-spacing:-.04em}
+#home .boreal-home-prize span{font-size:12px;line-height:1.4;color:#fff6df;white-space:nowrap}
+#home .boreal-home-prize small{font-size:9px;line-height:1.3;color:#e0dec9}
+#home .boreal-home-prize.unavailable{border-color:#b9c5b95e;background:#112920c9;box-shadow:none}
+#home .boreal-home-prize.unavailable strong{color:#aebdb3}
+#home .boreal-home-prize.unavailable small{color:#f4d1b2}
+#home .boreal-home-conditions{list-style:none;display:block;max-width:450px;padding:0;margin:3px 0 0;color:#e7e9df;font-size:11px;line-height:1.55;text-shadow:0 1px 5px #071c16}
+#home .boreal-home-conditions li{display:inline;margin:0}
+#home .boreal-home-conditions li:not(:last-child)::after{content:" · ";color:#efcd7a}
+#home:not([data-game-mode="rewards"]) .boreal-home-conditions li::after{content:none}
+#home:not([data-game-mode="rewards"]) .boreal-home-conditions li:not(:nth-child(2)){display:none}
+#home .boreal-home-actions{max-width:450px;display:grid;gap:10px}
+#home button{margin:0;min-height:46px;padding:12px 10px;border-radius:9px;font-size:11px;letter-spacing:.025em}
+#home #start{min-height:64px;display:flex;align-items:center;justify-content:center;gap:20px;background:var(--boreal-gold);border:1px solid #fff0b9;box-shadow:0 4px 0 #7a6138,0 9px 26px #06161066;color:#20372d;font-size:24px;font-weight:950;letter-spacing:.12em}
+#home #start::after{content:"→";font-size:27px;letter-spacing:0}
+#home button:focus-visible,.boreal-rules-dialog :focus-visible{outline:3px solid #fff2bd;outline-offset:4px}
+#home #start:not(:disabled):hover{background:#f9dda0}
+#home .boreal-home-secondary{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:4px}
+#home .boreal-home-secondary button{background:#112e28c9;border:1px solid #f4eee55e;color:#fff7ed;text-transform:none;font-weight:650;font-size:12px;box-shadow:0 3px 12px #0002}
+#home button.boreal-rules-button{justify-self:start;width:auto;min-height:36px;padding:5px 0;background:none;border:0;border-radius:0;color:#e8d8ad;font-size:12px;text-transform:none;font-weight:600;letter-spacing:0;text-decoration:underline;text-underline-offset:4px}
+#home .boreal-home-links{display:flex;align-items:center;justify-content:space-between;gap:10px}
+#home .boreal-home-links a{display:flex;align-items:center;min-height:36px;color:#e8d8ad;font-size:11px;font-weight:600;text-decoration:underline;text-underline-offset:4px}
+#home p.boreal-home-eligibility{max-width:450px;margin:4px 0 12px;text-align:left;font-size:11px;line-height:1.5;color:#e3e5d9;text-shadow:0 1px 6px #071c16}
+#home p.boreal-home-record{max-width:none;margin:10px 0 0;text-align:left;font-size:11px;color:#c1cec5;line-height:1.5}
+#home .boreal-home-record strong{font-weight:650;color:#eee8d6}
+#home .boreal-menu-notice:empty{display:none}
+#home p.boreal-menu-notice{margin:0 0 10px;max-width:450px;color:#fff1bb;text-align:left;font-size:12px;line-height:1.4}
+#home .boreal-credit{grid-column:1/-1;font-size:10px;line-height:1.4;color:#c4d0c7b8;margin:0;text-align:left}
+.boreal-menu-enabled #app:has(#home:not(.off))>.foot{display:none}
+.boreal-menu-enabled #app:has(#home:not(.off)) #rewardClaim:not(.off){position:fixed}
+.boreal-rules-dialog{position:fixed;inset:0;z-index:20;display:none;align-items:center;justify-content:center;padding:max(16px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) max(16px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left));background:#071713d9;backdrop-filter:blur(6px)}
+.boreal-rules-dialog.open{display:flex}
+.boreal-rules-content{width:min(100%,660px);max-height:100%;overflow:auto;overscroll-behavior:contain;padding:clamp(20px,4vw,34px);border:1px solid #efcd7a85;border-radius:16px;background:#192f26;color:#fff;box-shadow:0 20px 90px #0008;user-select:text}
+.boreal-rules-content h2{margin:0 0 24px;font-size:26px;color:#efcd7a;line-height:1.15;outline:none}
+.boreal-rules-content h3{margin:0 0 14px;font-size:19px;color:#efcd7a}
+.boreal-rules-content p{max-width:none;text-align:left;font-size:14px;line-height:1.65;color:#f0eee4;margin:12px 0}
+.boreal-rules-content a{color:#efcd7a;text-underline-offset:3px}
+.boreal-reward-info{padding-bottom:18px;margin-bottom:20px;border-bottom:1px solid #efcd7a38}
+.boreal-reward-tiers{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:18px 0}
+.boreal-reward-tiers span{padding:12px 4px;border:1px solid #efcd7a55;border-radius:8px;background:#666c3729;text-align:center;font-size:12px;line-height:1.6}
+.boreal-reward-tiers strong{display:block;color:#efcd7a;font-size:25px}
+.boreal-reward-tiers .unavailable{opacity:.65;background:#ffffff05}
+.boreal-reward-tiers small{display:block;font-size:10px;line-height:1.4}
+.boreal-rules-content button{margin-top:16px;background:#efcd7a;color:#20372d;border:1px solid #fff0b9;min-height:48px;border-radius:8px}
+@media(max-width:899px) and (orientation:portrait),(max-width:899px) and (min-height:501px){
+ #home::before{background:linear-gradient(0deg,#0c251df2 0%,#0c251dd6 36%,#0c251d40 70%,#0c251d05),url('assets/noel/forest-panorama-noel.png') center 35%/cover no-repeat}
+ #home .boreal-home-shell{min-height:100%;padding:max(20px,env(safe-area-inset-top)) clamp(20px,6vw,40px) max(16px,env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:0;width:min(100%,650px)}
+ #home .brand{width:100%;font-size:12px;text-align:center;min-height:16px;margin-bottom:clamp(58px,9vh,100px)}
+ #home .boreal-home-copy{align-self:stretch;max-width:none;width:100%;padding:0;margin:auto 0}
+ #home .boreal-home-scene{position:absolute;top:110px;right:5%;width:41%;height:165px;min-height:0}
+ #home .noelEdition{font-size:9px;letter-spacing:.12em;margin:0 0 14px;padding:5px 8px}
+ #home h1{font-size:clamp(29px,8.6vw,47px);margin:0 0 16px;max-width:63%;position:relative;z-index:1}
+ #home .tips{gap:9px;max-width:none;margin:0 0 17px}
+ #home .tip{font-size:10px;gap:5px;max-width:32%}
+ #home .tip b{font-size:20px}
+ #home .boreal-home-status{font-size:12px;margin-bottom:14px;gap:3px;max-width:none}
+ #home .boreal-home-status strong{font-size:12px}
+ #home .boreal-home-prizes{max-width:none;gap:8px;margin-bottom:12px}
+ #home .boreal-home-prize{min-height:91px;padding:10px 4px}
+ #home .boreal-home-prize strong{font-size:32px}
+ #home .boreal-home-prize span{font-size:11px}
+ #home .boreal-home-conditions{font-size:11px;max-width:none}
+ #home .boreal-home-actions{max-width:none;gap:8px}
+ #home #start{min-height:58px;font-size:23px}
+ #home .boreal-home-secondary{gap:8px;margin-top:3px}
+ #home .boreal-home-secondary button{min-height:44px;font-size:12px;padding:10px 5px}
+ #home button.boreal-rules-button{min-height:34px;font-size:12px}
+ #home p.boreal-home-eligibility{margin:0 0 10px;max-width:none;font-size:11px}
+ #home p.boreal-home-record{font-size:10px}
+ #home .boreal-credit{width:100%;font-size:9px;text-align:center;margin-top:18px}
+}
+@media(min-width:600px) and (max-width:899px) and (min-height:750px){
+ #home .boreal-home-shell{padding:30px 40px}
+ #home .brand{margin-bottom:140px;font-size:15px}
+ #home .boreal-home-scene{top:180px;height:285px;right:3%}
+ #home h1{font-size:60px;max-width:60%}
+ #home .tips{margin-bottom:28px}
+ #home .tip{font-size:12px}
+ #home .boreal-home-status{margin-bottom:22px}
+}
+@media(max-width:899px) and (max-height:710px) and (orientation:portrait),(max-width:899px) and (min-height:501px) and (max-height:710px){
+ #home .boreal-home-shell{padding-top:max(14px,env(safe-area-inset-top));padding-bottom:10px}
+ #home .brand{margin-bottom:42px;font-size:11px}
+ #home .boreal-home-scene{top:86px;height:140px;right:4%}
+ #home .noelEdition{margin-bottom:9px;font-size:8px}
+ #home h1{font-size:clamp(28px,8.2vw,39px);margin-bottom:12px}
+ #home .tips{margin-bottom:12px}
+ #home .tip{font-size:9px}
+ #home .tip b{font-size:18px}
+ #home .boreal-home-status{margin-bottom:11px;font-size:11px}
+ #home .boreal-home-status strong{font-size:11px}
+ #home .boreal-home-prizes{margin-bottom:10px;gap:7px}
+ #home .boreal-home-prize{min-height:81px;padding:8px 3px;gap:2px}
+ #home .boreal-home-prize strong{font-size:28px}
+ #home .boreal-home-prize span{font-size:10px}
+ #home .boreal-home-prize small{font-size:8px}
+ #home .boreal-home-conditions{font-size:10px;line-height:1.5}
+ #home #start{min-height:53px}
+ #home .boreal-home-actions{gap:6px}
+ #home .boreal-home-secondary button{min-height:44px;font-size:11px}
+ #home p.boreal-home-eligibility{font-size:10px;margin-bottom:7px}
+ #home .boreal-credit{margin-top:12px;font-size:8px}
+}
+@media(max-height:500px) and (orientation:landscape){
+ #home .boreal-home-shell{min-height:100%;padding:15px 28px 12px;grid-template-columns:minmax(340px,1fr) 1fr;gap:8px 30px}
+ #home .brand{font-size:10px}
+ #home .boreal-home-copy{padding:0;max-width:440px}
+ #home .noelEdition{padding:3px 7px;font-size:8px;margin-bottom:5px}
+ #home h1{font-size:32px;line-height:1.03;margin-bottom:8px}
+ #home p.boreal-home-intro{display:none}
+ #home .tips{margin-bottom:6px;gap:8px}
+ #home .tip{font-size:9px}
+ #home .tip b{font-size:16px}
+ #home .boreal-home-status{margin-bottom:9px;font-size:10px;gap:0}
+ #home .boreal-home-status strong{font-size:10px}
+ #home .boreal-home-prizes{margin-bottom:8px;gap:7px}
+ #home .boreal-home-prize{min-height:72px;padding:6px 3px;gap:1px}
+ #home .boreal-home-prize strong{font-size:26px}
+ #home .boreal-home-prize span{font-size:9px}
+ #home .boreal-home-prize small{font-size:8px}
+ #home .boreal-home-conditions{font-size:9px;line-height:1.4}
+ #home[data-game-mode="rewards"] .boreal-home-copy{display:grid;grid-template-columns:1fr;max-width:440px}
+ #home .boreal-home-actions{gap:5px}
+ #home #start{min-height:44px;font-size:20px;padding:7px}
+ #home .boreal-home-secondary{margin:0;gap:7px}
+ #home .boreal-home-secondary button{min-height:44px;padding:6px;font-size:10px}
+ #home button.boreal-rules-button{min-height:28px;padding:2px 0;font-size:10px}
+ #home p.boreal-home-eligibility{font-size:9px;margin:0 0 5px;line-height:1.35}
+ #home p.boreal-home-record{font-size:9px}
+ #home .boreal-home-scene{min-height:0}
+ #home .boreal-credit{font-size:8px}
+ #home .boreal-home-links a{min-height:28px;font-size:9px}
+}
+@media(max-width:340px) and (orientation:portrait){#home .boreal-home-scene{top:86px;height:130px}}
+@media(max-height:500px) and (orientation:portrait){#home .boreal-home-scene{height:130px}}
+@media(prefers-reduced-motion:reduce){#home button:active{transform:none}}

@@ -6,12 +6,14 @@ import { handleRequest } from "../server/api.mjs";
 import { startSession, cleanup, award } from "../server/store.mjs";
 import { POLICY_VERSION, secureId, monthWindow, scoreValue, torontoDay } from "../server/common.mjs";
 import { privateHmac } from "../server/sms.mjs";
+import { customerColumns } from '../server/customer.mjs';
+import { migrateSqlite, migrationFiles, migrationSql } from "./helpers/migrations.cjs";
 const schema = readFileSync(new URL("../migrations/0001_rewards.sql", import.meta.url), "utf8");
 const fixture = JSON.parse(readFileSync(new URL("./fixtures/game-session-winning-rewards.json", import.meta.url), "utf8"));
 class D1 {
-  constructor() {
+  constructor(options) {
     this.sqlite = new DatabaseSync(":memory:");
-    this.sqlite.exec(schema);
+    migrateSqlite(this.sqlite, options);
   }
   prepare(sql) {
     const sqlite = this.sqlite;
@@ -43,7 +45,7 @@ class D1 {
   }
 }
 function environment() {
-  return { DB: new D1(), APP_ORIGIN: "https://game.example", REWARDS_ENABLED: "true", SMS_APPROVED: "true", TERMS_APPROVED: "true", SMS_PROVIDER: "twilio", SMS_DAILY_LIMIT: "10", REWARDS_HMAC_SECRET: "a".repeat(48), TURNSTILE_SITE_KEY: "site-key-public", TURNSTILE_SECRET: "secret-turnstile", TWILIO_ACCOUNT_SID: "AC" + "1".repeat(32), TWILIO_AUTH_TOKEN: "token".repeat(8), TWILIO_VERIFY_SERVICE_SID: "VA" + "2".repeat(32), ACCESS_TEAM_DOMAIN: "api-tests.cloudflareaccess.com", ACCESS_AUD: "rewards-audience" };
+  return { DB: new D1(), APP_ORIGIN: "https://game.example", REWARDS_ENABLED: "true", PHONE_VERIFICATION_MODE:"sms", SMS_APPROVED: "true", TERMS_APPROVED: "true", SMS_PROVIDER: "twilio", SMS_DAILY_LIMIT: "10", REWARDS_HMAC_SECRET: "a".repeat(48), TURNSTILE_SITE_KEY: "site-key-public", TURNSTILE_SECRET: "secret-turnstile", TWILIO_ACCOUNT_SID: "AC" + "1".repeat(32), TWILIO_AUTH_TOKEN: "token".repeat(8), TWILIO_VERIFY_SERVICE_SID: "VA" + "2".repeat(32), ACCESS_TEAM_DOMAIN: "api-tests.cloudflareaccess.com", ACCESS_AUD: "rewards-audience" };
 }
 const rawOwner = "o".repeat(43);
 const ownerHeader = `__Host-rewards-owner=${rawOwner}`;
@@ -58,7 +60,7 @@ async function ownedGame(env, { cap = 2e3, offset = 0, owner = rawOwner } = {}) 
   const created = now - Math.ceil(fixture.ticks / 120 * 1e3) - 1e3 + offset;
   const month = monthWindow(created).month;
   if (cap !== 2e3) env.DB.sqlite.prepare("INSERT OR REPLACE INTO budgets(month,used_cents,reserved_cents) VALUES(?,?,0)").run(month, 1e4 - cap);
-  return startSession(env.DB, { id: secureId(), ownerHash, seed: fixture.seed, width: fixture.width, height: fixture.height, engineVersion: fixture.engineVersion, month, now: created, expiresAt: now + 20 * 6e4, allowRewards: true, quotaDay:torontoDay(created), quotaLimit:Number(env.SMS_DAILY_LIMIT) });
+  return startSession(env.DB, { id: secureId(), ownerHash, seed: fixture.seed, width: fixture.width, height: fixture.height, engineVersion: fixture.engineVersion, month, now: created, expiresAt: now + 20 * 6e4, allowRewards: true, quotaDay:torontoDay(created), quotaLimit:Number(env.SMS_DAILY_LIMIT),phoneVerificationMode:env.PHONE_VERIFICATION_MODE??"unverified" });
 }
 const replay = (s) => ({ sessionId: s.id, ticks: fixture.ticks, jumps: fixture.jumps, resizes: fixture.resizes, score: 999999999 });
 let turnstileGood = true;
@@ -80,7 +82,7 @@ function mockFetch() {
         return Response.json({ service_sid: "VA" + "2".repeat(32), sid: "VE" + "3".repeat(32), status: "pending", to: params.get("To") });
       }
       checks++;
-      if (beforeCheck) beforeCheck();
+      if (beforeCheck) await beforeCheck();
       return Response.json({ service_sid: "VA" + "2".repeat(32), sid: "VE" + "3".repeat(32), status: providerGood ? "approved" : "pending", valid: providerGood, to: "+15145551234" });
     }
     throw Error("Unexpected outbound URL " + url);
@@ -182,6 +184,54 @@ test("write requests enforce origin, fetch metadata, content type and 128KiB str
   assert.equal((await api(env, "/api/games/start", {}, { "Sec-Fetch-Site": "cross-site" })).status, 403);
   assert.equal((await api(env, "/api/games/start", {}, { "Content-Type": "application/jsonbad" })).status, 415);
   assert.equal((await api(env, "/api/games/start", '{"x":"' + "x".repeat(131072) + '"}')).status, 413);
+});
+test('dashboard counts real records only and employee management remains restricted to active managers', async () => {
+  const env = environment();
+  const headers = {'Cf-Access-Jwt-Assertion':await jwt()};
+  assert.equal((await api(env, '/api/admin/dashboard')).status, 401);
+  assert.equal((await api(env, '/api/admin/employees')).status, 401);
+  assert.equal((await api(env, '/api/admin/dashboard', undefined, headers)).status, 403);
+  env.DB.sqlite.prepare("INSERT INTO employees(sub,email,name,role) VALUES('alice','alice@example.com','Alice','staff')").run();
+  const dashboardResponse = await api(env, '/api/admin/dashboard', undefined, headers);
+  assert.equal(dashboardResponse.status, 200);
+  assert.equal(dashboardResponse.headers.get('Cache-Control'), 'no-store');
+  const dashboard = await dashboardResponse.json();
+  assert.equal(dashboard.totals.registeredPlayers, 0);
+  assert.equal(dashboard.totals.recordedGames, 0);
+  assert.equal(dashboard.budget.budgetCents, 10000);
+  assert.equal(dashboard.coverage.gamesComplete, false);
+  assert.equal((await api(env, '/api/admin/employees', undefined, headers)).status, 403);
+  assert.equal((await api(env, '/api/admin/employees', {email:'staff@example.invalid',name:'Personnel',role:'staff'}, headers)).status, 403);
+  assert.equal(env.DB.sqlite.prepare('SELECT COUNT(*) n FROM employees').get().n, 1);
+  assert.equal(sent, 0);
+});
+test('manager creates and revokes a staff invitation through authenticated CSRF-protected routes', async () => {
+  const env = environment();
+  env.DB.sqlite.prepare("INSERT INTO employees(sub,email,name,role) VALUES('alice','alice@example.com','Alice','manager')").run();
+  const headers = {'Cf-Access-Jwt-Assertion':await jwt()};
+  const body = {email:'Personne@Example.Invalid',name:'Personnel du restaurant',role:'staff'};
+  assert.equal((await api(env, '/api/admin/employees', body, {...headers,Origin:'https://evil.example'})).status, 403);
+  assert.equal((await api(env, '/api/admin/employees', {...body,role:'manager'}, headers)).status, 400);
+  const created = await api(env, '/api/admin/employees', body, headers);
+  assert.equal(created.status, 200);
+  const invited = (await created.json()).employee;
+  assert.equal(invited.sub, 'invite:personne@example.invalid');
+  assert.equal(invited.active, true);
+  assert.equal(invited.role, 'staff');
+  assert.equal((await (await api(env, '/api/admin/employees', undefined, headers)).json()).employees.length, 2);
+  const deactivate = await handleRequest(new Request(env.APP_ORIGIN+'/api/admin/employees', {
+    method:'PATCH',headers:{...headers,Origin:env.APP_ORIGIN,'Content-Type':'application/json'},
+    body:JSON.stringify({sub:invited.sub,active:false}),
+  }), env);
+  assert.equal(deactivate.status, 200);
+  assert.equal((await deactivate.json()).employee.active, false);
+  const revokedHeaders = {'Cf-Access-Jwt-Assertion':await jwt(invited.sub,invited.email)};
+  assert.equal((await api(env, '/api/admin/dashboard', undefined, revokedHeaders)).status, 403);
+  assert.equal(env.DB.sqlite.prepare("SELECT COUNT(*) n FROM audit WHERE action='employee_created'").get().n, 1);
+  assert.equal(env.DB.sqlite.prepare("SELECT COUNT(*) n FROM audit WHERE action='employee_deactivated'").get().n, 1);
+  env.DB.sqlite.prepare("UPDATE employees SET active=0 WHERE sub='alice'").run();
+  assert.equal((await api(env, '/api/admin/employees', undefined, headers)).status, 403);
+  assert.equal(sent, 0);
 });
 test("start reserves announced cap, requires real Turnstile, binds secure owner and resolves mode changes", async () => {
   const env = environment();
@@ -295,7 +345,7 @@ test("Toronto DST months, cutoff, reservation expiry and no carry-over", async (
   assert.equal(scoreValue(7500), 1e3);
   assert.equal(scoreValue(1e4), 2e3);
 });
-test("Access identity requires verified JWT and admin requires active allowlist; claim/issue locks actor and audit has names", async () => {
+test("Access identity requires verified JWT and admin requires active allowlist; manual discount use locks actor and audit has names", async () => {
   const env = environment();
   assert.equal((await api(env, "/api/admin/me", void 0, { "Cf-Access-Authenticated-User-Email": "alice@example.com" })).status, 401);
   const token = await jwt();
@@ -313,13 +363,14 @@ test("Access identity requires verified JWT and admin requires active allowlist;
   assert.equal(r.status, 200);
   assert.equal((await r.json()).reward.claimedByName, "Alice No\xEBl");
   const bob = { "Cf-Access-Jwt-Assertion": await jwt("bob", "bob@example.com") };
-  assert.equal((await api(env, `/api/admin/rewards/${reward.id}/issue`, { lightspeedRef: "LS-1" }, bob)).status, 409);
-  assert.equal((await api(env, `/api/admin/rewards/${reward.id}/issue`, { lightspeedRef: "LS-1" }, headers)).status, 200);
-  assert.equal((await api(env, `/api/admin/rewards/${reward.id}/issue`, { lightspeedRef: "LS-1" }, headers)).status, 200);
+  assert.equal((await api(env, `/api/admin/rewards/${reward.id}/use`, { discountApplied: true, foodOnlyConfirmed:true, eligibleFoodCents:2000 }, bob)).status, 409);
+  assert.equal((await api(env, `/api/admin/rewards/${reward.id}/use`, { discountApplied: true, foodOnlyConfirmed:true, eligibleFoodCents:2000 }, headers)).status, 200);
+  assert.equal((await api(env, `/api/admin/rewards/${reward.id}/use`, { discountApplied: true, foodOnlyConfirmed:true, eligibleFoodCents:2000 }, headers)).status, 200);
   const recovered = await (await api(env, "/api/rewards/confirmation")).json();
   const verifiedAgain = await (await api(env, "/api/rewards/sms/verify", { challengeId, phone: "+15145551234", code: "123456" })).json();
   for (const receipt of [recovered.reward, verifiedAgain.reward]) {
     assert.equal(receipt.status, "issued");
+    assert.equal(receipt.discountApplied, true);
     assert.equal(receipt.code, reward.code);
     for (const field of ["claimedBy", "claimedByName", "issuedBy", "issuedByName", "lightspeedRef", "cancelReason", "cancelledByName"]) assert.equal(Object.hasOwn(receipt, field), false);
   }
@@ -332,6 +383,77 @@ test("Access identity requires verified JWT and admin requires active allowlist;
   assert.ok(csv.includes("'=HYPERLINK"));
   assert.ok(csv.includes("Alice No\xEBl"));
   assert.ok(csv.includes("issuedAt"));
+  assert.ok(csv.includes("discountApplied"));
+});
+
+test("manual discount use requires a claimed code, a strict true attestation and the claimant; retry records one use", async () => {
+  const env = environment();
+  env.DB.sqlite.prepare("INSERT INTO employees(sub,email,name,role) VALUES(?,?,?,?)").run("alice", "alice@example.com", "Alice Noël", "staff");
+  const phoneHash = await privateHmac(env, "phone", "+15145551234");
+  const ownerHash = await privateHmac(env, "owner", rawOwner);
+  const run = await ownedGame(env);
+  await api(env, "/api/games/finish", replay(run));
+  env.DB.sqlite.prepare("UPDATE sessions SET bound_phone_hash=?,first_name='Camille',last_name='Essai' WHERE id=?").run(phoneHash, run.id);
+  const { reward } = await award(env.DB, { sessionId: run.id, ownerHash, phoneHash, now });
+  const headers = { "Cf-Access-Jwt-Assertion": await jwt() };
+  const endpoint = `/api/admin/rewards/${reward.id}`;
+  assert.equal((await api(env, `${endpoint}/use`, { discountApplied: true, foodOnlyConfirmed:true, eligibleFoodCents:2000 }, headers)).status, 409);
+  assert.equal((await api(env, `${endpoint}/issue`, { lightspeedRef: "LS-LEGACY" }, headers)).status, 410);
+  assert.equal(env.DB.sqlite.prepare("SELECT status FROM rewards WHERE id=?").get(reward.id).status, "pending");
+  assert.equal((await api(env, `${endpoint}/claim`, {}, headers)).status, 200);
+  const claimed = env.DB.sqlite.prepare("SELECT claimed_by,claimed_by_name,claimed_at FROM rewards WHERE id=?").get(reward.id);
+  const budget = env.DB.sqlite.prepare("SELECT used_cents,reserved_cents FROM budgets").get();
+  for (const body of [{}, {discountApplied:false}, {discountApplied:"true"}, {discountApplied:1}, {discountApplied:null}, {lightspeedRef:"LS-OLD-UI"}]) assert.equal((await api(env, `${endpoint}/use`, body, headers)).status, 400);
+  assert.equal(env.DB.sqlite.prepare("SELECT status,discount_applied,lightspeed_ref FROM rewards WHERE id=?").get(reward.id).status, "claimed");
+  const first = await api(env, `${endpoint}/use`, { discountApplied: true, foodOnlyConfirmed:true, eligibleFoodCents:2000 }, headers);
+  now += 2000;
+  const retry = await api(env, `${endpoint}/use`, { discountApplied: true, foodOnlyConfirmed:true, eligibleFoodCents:2000 }, headers);
+  assert.equal(first.status, 200);
+  assert.equal(retry.status, 200);
+  const firstReward = (await first.json()).reward;
+  assert.deepEqual((await retry.json()).reward, firstReward);
+  assert.equal(firstReward.discountApplied, true);
+  assert.equal(firstReward.lightspeedRef, null);
+  assert.deepEqual(env.DB.sqlite.prepare("SELECT claimed_by,claimed_by_name,claimed_at FROM rewards WHERE id=?").get(reward.id), claimed);
+  assert.deepEqual(env.DB.sqlite.prepare("SELECT used_cents,reserved_cents FROM budgets").get(), budget);
+  assert.equal((await api(env, `${endpoint}/use`, { discountApplied: false }, headers)).status, 400);
+  assert.equal((await api(env, `${endpoint}/issue`, { discountApplied: true, foodOnlyConfirmed:true, eligibleFoodCents:2000 }, headers)).status, 410);
+  assert.equal(env.DB.sqlite.prepare("SELECT COUNT(*) count FROM audit WHERE reward_id=? AND action='issued'").get(reward.id).count, 1);
+  const audit = env.DB.sqlite.prepare("SELECT details FROM audit WHERE reward_id=? AND action='issued'").get(reward.id);
+  assert.deepEqual(JSON.parse(audit.details), {valueCents:2000,previewTestConsumed:false,discountApplied:true,foodOnlyConfirmed:true,eligibleFoodCents:2000,appliedValueCents:2000,unusedCents:0,reason:null});
+});
+
+test("a historical completed code remains terminal without inventing a manual discount attestation", async () => {
+  const env = environment();
+  env.DB.sqlite.close();
+  env.DB = new D1({before:"0003"});
+  env.DB.sqlite.prepare("INSERT INTO employees(sub,email,name,role) VALUES('alice','alice@example.com','Alice Historique','staff')").run();
+  const run={id:secureId(),owner_hash:await privateHmac(env,'owner',rawOwner)};
+  const phoneHash = await privateHmac(env, "phone", "+15145551234");
+  env.DB.sqlite.prepare("INSERT INTO budgets(month) VALUES('2026-11')").run();env.DB.sqlite.prepare("INSERT INTO sms_daily(day) VALUES('2026-11-14')").run();
+  env.DB.sqlite.prepare("INSERT INTO sessions(id,owner_hash,seed,width,height,mode,engine_version,month,cap_cents,created_at,expires_at,state,reservation_active,score,claim_deadline,bound_phone_hash,first_name,last_name,sms_day,sms_reserved) VALUES(?,?,1,390,844,'rewards','legacy','2026-11',2000,?,?,'eligible',1,10000,?,?,'Camille','Historique','2026-11-14',1)").run(run.id,run.owner_hash,now-1000,now+600000,now+600000,phoneHash);
+  const reward={id:secureId()};env.DB.sqlite.prepare("INSERT INTO rewards(id,session_id,phone_hash,code,value_cents,month,first_name,last_name,score,confirmed_at,claim_by,last_actor_sub,last_actor_name) VALUES(?,?,?,'LEGACY-CODE',2000,'2026-11','Camille','Historique',10000,?,?,?,'Joueur')").run(reward.id,run.id,phoneHash,now,now+2592000000,run.owner_hash);
+  env.DB.sqlite.prepare("UPDATE rewards SET status='claimed',claimed_by='alice',claimed_by_name='Alice Historique',claimed_at=?,last_actor_sub='alice',last_actor_name='Alice Historique' WHERE id=?").run(now, reward.id);
+  env.DB.sqlite.prepare("UPDATE rewards SET status='issued',issued_by='alice',issued_by_name='Alice Historique',issued_at=?,lightspeed_ref='HISTORIQUE-CONSERVE',last_actor_sub='alice',last_actor_name='Alice Historique' WHERE id=?").run(now, reward.id);
+  const old = env.DB.sqlite.prepare("SELECT * FROM rewards WHERE id=?").get(reward.id);
+  const auditBefore = env.DB.sqlite.prepare("SELECT * FROM audit ORDER BY id").all();
+  const migration = migrationSql[migrationFiles.findIndex(name => name.startsWith("0003_"))];
+  assert.ok(migration, "the manual-discount migration is present");
+  env.DB.sqlite.exec("BEGIN IMMEDIATE");
+  for(let i=migrationFiles.findIndex(name=>name.startsWith("0003_"));i<migrationSql.length;i++)env.DB.sqlite.exec(migrationSql[i]);
+  env.DB.sqlite.exec("COMMIT");
+  const headers = {"Cf-Access-Jwt-Assertion":await jwt()};
+  assert.equal((await api(env, `/api/admin/rewards/${reward.id}/use`, {discountApplied:true,foodOnlyConfirmed:true,eligibleFoodCents:2000}, headers)).status, 409);
+  assert.equal((await api(env, `/api/admin/rewards/${reward.id}/issue`, {lightspeedRef:"NOUVELLE-REFERENCE"}, headers)).status, 410);
+  const stored = env.DB.sqlite.prepare("SELECT * FROM rewards WHERE id=?").get(reward.id);
+  assert.equal(stored.discount_applied, 0);
+  for (const key of Object.keys(old)) assert.deepEqual(stored[key], old[key], key);
+  assert.deepEqual(env.DB.sqlite.prepare("SELECT * FROM audit ORDER BY id").all(), auditBefore);
+  assert.deepEqual({...env.DB.sqlite.prepare("SELECT used_cents,reserved_cents FROM budgets").get()}, {used_cents:2000,reserved_cents:0});
+  const receipt = (await (await api(env, "/api/rewards/confirmation")).json()).reward;
+  assert.equal(receipt.status, "issued");
+  assert.equal(receipt.discountApplied, false);
+  assert.equal(Object.hasOwn(receipt, "lightspeedRef"), false);
 });
 
 test("cancellation never refunds budget or resets the rolling 30-day phone rule; pending expiry stays virtual", async () => {
@@ -356,7 +478,7 @@ test("cancellation never refunds budget or resets the rolling 30-day phone rule;
   const second = await ownedGame(env);
   await api(env, "/api/games/finish", replay(second));
   env.DB.sqlite.prepare("UPDATE sessions SET bound_phone_hash=?,first_name='Alice',last_name='Noël' WHERE id=?").run(phoneHash, second.id);
-  assert.equal((await award(env.DB, { sessionId: second.id, ownerHash, phoneHash, now })).reason, "phone_cooldown");
+  assert.ok(["phone_cooldown","device_cooldown"].includes((await award(env.DB, { sessionId: second.id, ownerHash, phoneHash, now })).reason));
   now++;
   const secondAward = await award(env.DB, { sessionId: second.id, ownerHash, phoneHash, now });
   assert.equal(secondAward.reward.value_cents, 2000);
@@ -413,13 +535,13 @@ test("admin shows current Toronto month money and real cross-month code counts a
   let phoneSequence = 0;
   async function confirm(at, status = "pending") {
     now = Date.parse(at);
-    const run = await ownedGame(env);
+    const run = await ownedGame(env,{owner:secureId(32)});
     const phoneHash = await privateHmac(env, "phone", `+1514555${String(++phoneSequence).padStart(4, "0")}`);
     env.DB.sqlite.prepare("UPDATE sessions SET state='eligible',score=10000,claim_deadline=?,bound_phone_hash=?,first_name='Camille',last_name=? WHERE id=?").run(now+600000, phoneHash, `Gagnant ${phoneSequence}`, run.id);
     const { reward } = await award(env.DB, {sessionId:run.id,ownerHash:run.owner_hash,phoneHash,now});
     const headers = {"Cf-Access-Jwt-Assertion":await jwt()};
     if (["claimed", "issued"].includes(status)) assert.equal((await api(env, `/api/admin/rewards/${reward.id}/claim`, {}, headers)).status, 200);
-    if (status === "issued") assert.equal((await api(env, `/api/admin/rewards/${reward.id}/issue`, {lightspeedRef:"LS-ancien"}, headers)).status, 200);
+    if (status === "issued") assert.equal((await api(env, `/api/admin/rewards/${reward.id}/use`, {discountApplied:true,foodOnlyConfirmed:true,eligibleFoodCents:2000}, headers)).status, 200);
     if (status === "cancelled") assert.equal((await api(env, `/api/admin/rewards/${reward.id}/cancel`, {reason:"Annulation confirmée"}, headers)).status, 200);
     return reward;
   }
@@ -431,7 +553,7 @@ test("admin shows current Toronto month money and real cross-month code counts a
   const latest = await confirm("2026-11-15T16:00:00Z");
   const headers = {"Cf-Access-Jwt-Assertion":await jwt()};
   const budget = await (await api(env, "/api/admin/budget", undefined, headers)).json();
-  assert.deepEqual(budget, {month:"2026-11",budgetCents:10000,usedCents:6000,reservedCents:0,remainingCents:4000,pendingCount:2,usedCount:2,countScope:"all"});
+  for (const [key,value] of Object.entries({month:"2026-11",budgetCents:10000,usedCents:6000,reservedCents:0,remainingCents:4000,pendingCount:2,usedCount:2,countScope:"all"})) assert.equal(budget[key], value, key);
   const list = await (await api(env, "/api/admin/rewards", undefined, headers)).json();
   assert.equal(list.rewards.length, 6);
   assert.equal(list.rewards[0].id, latest.id);
@@ -451,4 +573,96 @@ test("the first SMS keeps its reserved place when other sends saturate the quota
   const sentResponse=await api(env,"/api/rewards/sms/request",{sessionId:run.id,phone:"+15145551234",firstName:"Camille",lastName:"Essai",consentVersion:POLICY_VERSION});
   assert.equal(sentResponse.status,200);assert.equal(sent,1);
   assert.deepEqual({...env.DB.sqlite.prepare("SELECT count,reserved FROM sms_daily WHERE day=?").get(run.sms_day)},{count:2,reserved:0});
+});
+
+test("wrong phone can be corrected and SMS resent without losing score, reservation or deadline; old verification is invalid",async()=>{
+  const env=environment(),run=await ownedGame(env);await api(env,'/api/games/finish',replay(run));
+  const payload={sessionId:run.id,phone:'+15145551235',firstName:'Camille',lastName:'Essai',consentVersion:POLICY_VERSION};
+  const before=env.DB.sqlite.prepare('SELECT score,cap_cents,reservation_active,expires_at,claim_deadline FROM sessions').get();
+  assert.equal((await api(env,'/api/rewards/sms/request',{...payload,phone:'erreur'})).status,400);assert.equal(sent,0);
+  const initial=await(await api(env,'/api/rewards/sms/request',payload)).json();assert.ok(initial.challengeId);assert.equal(initial.sendsRemaining,4);
+  assert.equal((await api(env,'/api/rewards/sms/request',{...payload,phone:'+15145551234'})).status,429);
+  now+=61000;
+  const corrected=await(await api(env,'/api/rewards/sms/request',{...payload,phone:'+15145551234'})).json();assert.ok(corrected.challengeId);assert.notEqual(corrected.challengeId,initial.challengeId);assert.equal(corrected.sendsRemaining,3);
+  assert.deepEqual(env.DB.sqlite.prepare('SELECT score,cap_cents,reservation_active,expires_at,claim_deadline FROM sessions').get(),before);
+  assert.equal((await api(env,'/api/rewards/sms/verify',{challengeId:initial.challengeId,phone:payload.phone,code:'123456'})).status,409);
+  providerGood=false;assert.equal((await api(env,'/api/rewards/sms/verify',{challengeId:corrected.challengeId,phone:'+15145551234',code:'000000'})).status,400);
+  providerGood=true;const verified=await api(env,'/api/rewards/sms/verify',{challengeId:corrected.challengeId,phone:'+15145551234',code:'123456'});assert.equal(verified.status,200);const result=await verified.json();assert.equal(result.awarded,true);
+  const repeated=await(await api(env,'/api/rewards/sms/verify',{challengeId:corrected.challengeId,phone:'+15145551234',code:'123456'})).json();assert.equal(repeated.reward.code,result.reward.code);
+  assert.equal((await api(env,'/api/rewards/sms/request',payload)).status,409);assert.equal(env.DB.sqlite.prepare('SELECT COUNT(*) n FROM rewards').get().n,1);assert.equal(sent,2);
+});
+
+test("correction during an in-flight provider verification prevents the old phone from winning",async()=>{
+  const env=environment(),run=await ownedGame(env);await api(env,'/api/games/finish',replay(run));const payload={sessionId:run.id,phone:'+15145551234',firstName:'Camille',lastName:'Essai',consentVersion:POLICY_VERSION};
+  const old=await(await api(env,'/api/rewards/sms/request',payload)).json();
+  beforeCheck=async()=>{beforeCheck=null;now+=61000;assert.equal((await api(env,'/api/rewards/sms/request',{...payload,phone:'+15145551235'})).status,200);};
+  assert.equal((await api(env,'/api/rewards/sms/verify',{challengeId:old.challengeId,phone:payload.phone,code:'123456'})).status,409);
+  assert.equal(env.DB.sqlite.prepare('SELECT COUNT(*) n FROM rewards').get().n,0);assert.equal(env.DB.sqlite.prepare('SELECT reservation_active FROM sessions').get().reservation_active,1);
+});
+
+test("five verification sends are the hard per-game limit and expiry is never extended",async()=>{
+  const env=environment(),run=await ownedGame(env);await api(env,'/api/games/finish',replay(run));const payload={sessionId:run.id,phone:'+15145551234',firstName:'Camille',lastName:'Essai',consentVersion:POLICY_VERSION};
+  const deadline=env.DB.sqlite.prepare('SELECT claim_deadline FROM sessions').get().claim_deadline;
+  for(let index=0;index<5;index++){assert.equal((await api(env,'/api/rewards/sms/request',payload)).status,200);now+=61000;}
+  assert.equal((await api(env,'/api/rewards/sms/request',payload)).status,429);assert.equal(sent,5);assert.equal(env.DB.sqlite.prepare('SELECT claim_deadline FROM sessions').get().claim_deadline,deadline);
+});
+
+test("Preview consumption records no POS discount and is forbidden on production or without the flag",async()=>{
+  const env=environment();env.DB.sqlite.prepare("INSERT INTO employees VALUES('alice','alice@example.com','Alice','staff',1)").run();const run=await ownedGame(env);await api(env,'/api/games/finish',replay(run));const phoneHash=await privateHmac(env,'phone','+15145551234');env.DB.sqlite.prepare("UPDATE sessions SET bound_phone_hash=?,first_name='Camille',last_name='Essai' WHERE id=?").run(phoneHash,run.id);const {reward}=await award(env.DB,{sessionId:run.id,ownerHash:run.owner_hash,phoneHash,now});const headers={'Cf-Access-Jwt-Assertion':await jwt()},endpoint='/api/admin/rewards/'+reward.id;
+  await api(env,endpoint+'/claim',{},headers);assert.equal((await api(env,endpoint+'/use',{previewTestConsumed:true},headers)).status,403);
+  env.PREVIEW_TEST_REDEMPTION='true';env.DEPLOYMENT_ENVIRONMENT='preview';env.APP_ORIGIN='https://minijeux-4gy.pages.dev';assert.equal((await api(env,endpoint+'/use',{previewTestConsumed:true},headers)).status,403);
+  env.APP_ORIGIN='https://develop-noel-budget-configur.minijeux-4gy.pages.dev';const result=await api(env,endpoint+'/use',{previewTestConsumed:true},headers);assert.equal(result.status,200);const used=(await result.json()).reward;assert.equal(used.discountApplied,false);assert.equal(used.previewTestConsumed,true);assert.equal(used.appliedValueCents,null);
+  assert.equal((await api(env,endpoint+'/use',{previewTestConsumed:true},headers)).status,200);const audit=env.DB.sqlite.prepare("SELECT details FROM audit WHERE action='preview_test_used'").all();assert.equal(audit.length,1);assert.equal(JSON.parse(audit[0].details).appliedValueCents,0);
+});
+
+function launchEnvironment(){const env=environment();delete env.PHONE_VERIFICATION_MODE;env.SMS_APPROVED='false';env.SMS_DAILY_LIMIT='0';env.NOTIFICATION_SMS_ENABLED='false';for(const key of ['TWILIO_ACCOUNT_SID','TWILIO_AUTH_TOKEN','TWILIO_VERIFY_SERVICE_SID','TWILIO_MESSAGING_SERVICE_SID'])delete env[key];return env;}
+async function launchWin(env,{owner=rawOwner,phone='+15145551234',firstName='Camille',lastName='Noël'}={}){
+  const run=await ownedGame(env,{owner}),headers={Cookie:'__Host-rewards-owner='+owner};
+  const finished=await api(env,'/api/games/finish',replay(run),headers);assert.equal(finished.status,200);
+  const body={sessionId:run.id,phone,firstName,lastName,consentVersion:POLICY_VERSION};
+  return {run,headers,body,response:await api(env,'/api/rewards/claim',body,headers)};
+}
+test('launch without any Twilio settings awards after real replay and stores a protected searchable phone only for staff',async()=>{
+  const env=launchEnvironment();assert.equal((await(await api(env,'/api/rewards/status')).json()).mode,'rewards');
+  const w=await launchWin(env);assert.equal(w.response.status,200);const reward=(await w.response.json()).reward;assert.match(reward.code,/^GOAT-[A-F0-9]{32}$/);assert.equal(reward.phoneVerified,false);
+  for(const field of ['phone','phoneCiphertext','phone_ciphertext','device_hash','phoneLast4'])assert.equal(Object.hasOwn(reward,field),false);
+  const stored=env.DB.sqlite.prepare('SELECT * FROM rewards').get();assert.ok(stored.phone_ciphertext.startsWith('v1.'));assert.ok(!JSON.stringify(stored).includes('+15145551234'));assert.equal(stored.name_search,'camille noel');
+  assert.equal(sent,0);assert.equal(checks,0);assert.equal(env.DB.sqlite.prepare('SELECT COUNT(*) n FROM sms_daily').get().n,0);
+  env.DB.sqlite.prepare("INSERT INTO employees VALUES('alice','alice@example.com','Alice','staff',1)").run();const auth={'Cf-Access-Jwt-Assertion':await jwt()};
+  for(const term of ['NOEL','+1 (514) 555-1234',reward.code]){const result=await(await api(env,'/api/admin/rewards?search='+encodeURIComponent(term),undefined,auth)).json();assert.equal(result.rewards.length,1);assert.equal(result.rewards[0].phone,'+15145551234');}
+  assert.equal((await api(env,'/api/admin/rewards?search=Camille')).status,401);
+  const repeat=await api(env,'/api/rewards/claim',w.body,w.headers);assert.equal((await repeat.json()).reward.code,reward.code);assert.match(repeat.headers.get('Set-Cookie'),/HttpOnly/);
+  assert.equal((await api(env,'/api/rewards/claim',{...w.body,phone:'+15145551235'},w.headers)).status,409);
+});
+test('same phone with a different name on another device is denied, dated and signalled without a second code',async()=>{
+  const env=launchEnvironment(),first=await launchWin(env);const reward=(await first.response.json()).reward;
+  const second=await launchWin(env,{owner:secureId(32),firstName:'Autre',lastName:'Personne'});assert.equal(second.response.status,409);const denial=await second.response.json();assert.equal(denial.error,'phone_cooldown');assert.equal(denial.nextEligibleAt,new Date(Date.parse(reward.confirmedAt)+2592000000).toISOString());
+  const audit=env.DB.sqlite.prepare("SELECT details FROM audit WHERE action='duplicate_detected'").get();assert.equal(JSON.parse(audit.details).differentName,true);assert.equal(env.DB.sqlite.prepare('SELECT COUNT(*) n FROM rewards').get().n,1);
+});
+test('same browser with another phone is denied while play remains unlimited and consumes no new budget',async()=>{
+  const env=launchEnvironment(),first=await launchWin(env);const reward=(await first.response.json()).reward;
+  const before=env.DB.sqlite.prepare('SELECT used_cents,reserved_cents FROM budgets').get();
+  for(let index=0;index<20;index++){const response=await api(env,'/api/games/start',{width:390,height:844,expectedMode:'rewards'});assert.equal(response.status,200);const value=await response.json();assert.equal(value.playOnly,true);assert.equal(value.rewardRestriction.reason,'device_cooldown');assert.equal(value.rewardRestriction.nextEligibleAt,new Date(Date.parse(reward.confirmedAt)+2592000000).toISOString());}
+  assert.deepEqual(env.DB.sqlite.prepare('SELECT used_cents,reserved_cents FROM budgets').get(),before);
+  const second=await launchWin(env,{phone:'+15145551235'});assert.equal(second.response.status,409);assert.equal((await second.response.json()).error,'device_cooldown');assert.equal(env.DB.sqlite.prepare('SELECT COUNT(*) n FROM rewards').get().n,1);
+});
+test('only an active manager can grant a justified one-use phone/device exception and previous rewards remain intact',async()=>{
+  const env=launchEnvironment(),first=await launchWin(env);const reward=(await first.response.json()).reward;
+  env.DB.sqlite.prepare("INSERT INTO employees VALUES('alice','alice@example.com','Alice','staff',1)").run();const auth={'Cf-Access-Jwt-Assertion':await jwt()},path='/api/admin/rewards/'+reward.id;
+  const body={scope:'both',reason:'Appareil partagé, exception du gestionnaire',requestId:secureId()};
+  assert.equal((await api(env,path+'/unlock',body,auth)).status,403);env.DB.sqlite.prepare("UPDATE employees SET role='manager'").run();
+  assert.equal((await api(env,path+'/unlock',{...body,reason:''},auth)).status,400);
+  assert.equal((await api(env,path+'/unlock',body,auth)).status,200);assert.equal((await api(env,path+'/unlock',body,auth)).status,200);assert.equal(env.DB.sqlite.prepare('SELECT COUNT(*) n FROM reward_exceptions').get().n,2);
+  const allowed=await launchWin(env);assert.equal(allowed.response.status,200);const next=(await allowed.response.json()).reward;assert.notEqual(next.code,reward.code);
+  assert.equal(env.DB.sqlite.prepare('SELECT COUNT(*) n FROM reward_exceptions WHERE used_reward_id=?').get(next.id).n,2);assert.equal(env.DB.sqlite.prepare('SELECT used_cents FROM budgets').get().used_cents,4000);
+  const blocked=await api(env,'/api/games/start',{width:390,height:844,expectedMode:'rewards'});assert.equal((await blocked.json()).playOnly,true);
+  const info=await(await api(env,path+'/eligibility',undefined,auth)).json();assert.equal(info.history.length,2);assert.equal(info.potentialDuplicate,true);assert.ok(info.phone.nextEligibleAt);
+  assert.equal(env.DB.sqlite.prepare("SELECT COUNT(*) n FROM audit WHERE action='manager_exception_granted'").get().n,2);assert.equal(env.DB.sqlite.prepare("SELECT COUNT(*) n FROM audit WHERE action='manager_exception_consumed'").get().n,2);
+});
+
+test('a simultaneous attribution during eligibility reads returns the existing code rather than a false cooldown',async()=>{
+  const env=launchEnvironment(),run=await ownedGame(env);await api(env,'/api/games/finish',replay(run));const id=secureId(),phone='+15145551234',phoneHash=await privateHmac(env,'phone',phone),ownerHash=run.owner_hash;
+  const customer=await customerColumns(env,{phone,firstName:'Camille',lastName:'Noël',rewardId:id}),originalPrepare=env.DB.prepare.bind(env.DB);let inserted=false;
+  env.DB.prepare=sql=>{const statement=originalPrepare(sql);if(sql.includes('SELECT id,confirmed_at')&&sql.includes('device_hash=?')){const first=statement.first.bind(statement);statement.first=async()=>{if(!inserted){inserted=true;await award(env.DB,{id,sessionId:run.id,ownerHash,phoneHash,now,firstName:'Camille',lastName:'Noël',customer,unverifiedProfile:true});}return first();};}return statement;};
+  const response=await api(env,'/api/rewards/claim',{sessionId:run.id,phone,firstName:'Camille',lastName:'Noël',consentVersion:POLICY_VERSION});assert.equal(response.status,200);assert.equal((await response.json()).reward.id,id);assert.equal(env.DB.sqlite.prepare('SELECT COUNT(*) n FROM rewards').get().n,1);
 });

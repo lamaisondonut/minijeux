@@ -9,8 +9,8 @@ const root = path.resolve(__dirname, '..', 'v3');
 const artifacts = '/tmp/admin-rewards-artifacts';
 const employeeA = { sub: 'employee-a', subject: 'employee-a', name: 'Ariane Test', email: 'ariane@example.test', role: 'staff' };
 const employeeB = { sub: 'employee-b', subject: 'employee-b', name: 'Benoît Test', email: 'benoit@example.test', role: 'manager' };
-const fixture = (overrides = {}) => ({ id: 'reward-test-1', code: 'NOEL-TEST-0001', firstName: 'Camille', lastName: 'Essai', score: 7500, valueCents: 1000, status: 'pending', confirmedAt: '2026-11-14T12:00:00Z', claimBy: '2026-12-14T12:00:00Z', claimedAt: null, claimedBy: null, issuedAt: null, issuedBy: null, lightspeedRef: null, ...overrides });
-const budget = { month: '2026-11', budgetCents: 10000, usedCents: 1000, reservedCents: 1000, remainingCents: 8000, pendingCount: 1, usedCount: 2, countScope: 'all' };
+const fixture = (overrides = {}) => ({ id: 'reward-test-1', code: 'NOEL-TEST-0001', firstName: 'Camille', lastName: 'Essai', score: 7500, valueCents: 1000, status: 'pending', confirmedAt: '2026-11-14T12:00:00Z', claimBy: '2026-12-14T12:00:00Z', claimedAt: null, claimedBy: null, issuedAt: null, issuedBy: null, discountApplied: false, phone:'+15145551234',phoneVerified:false, ...overrides });
+const budget = { month: '2026-11', budgetCents: 10000, usedCents: 1000, reservedCents: 1000, remainingCents: 8000, pendingCount: 1, usedCount: 2, countScope: 'all', defaultBudgetCents: 10000, revision: 0, defaultRevision: 0, minimumBudgetCents: 2000, minimumFutureBudgetCents: 2000, updatedAt: null, updatedBy: null, updatedByName: null };
 const deferred = () => { let resolve; const promise = new Promise((done) => { resolve = done; }); return { promise, resolve }; };
 
 async function serve() {
@@ -31,20 +31,30 @@ async function serve() {
 
 async function mockApi(page, options = {}) {
   const employee = options.employee || employeeA;
-  const record = options.record || { reward: fixture(), claims: 0, issues: 0 };
+  const record = options.record || { reward: fixture(), claims: 0, uses: 0 };
   const send = (route, status, body) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
   await page.route('**/api/admin/**', async (route) => {
     const request = route.request();
     const url = new URL(request.url());
     const endpoint = url.pathname.slice('/api/admin'.length);
     if (options.intercept && await options.intercept({ route, request, url, endpoint, send, record, employee })) return;
-    if (endpoint === '/me') return send(route, options.meStatus || 200, options.meStatus ? { error: 'test', message: 'Accès indisponible pour ce test.' } : { employee });
+    if (endpoint === '/me') return send(route, options.meStatus || 200, options.meStatus ? { error: 'test', message: 'Accès indisponible pour ce test.' } : { employee,previewTestRedemption:options.previewTestRedemption===true,phoneVerificationMode:options.phoneVerificationMode||'unverified',notificationSmsEnabled:options.notificationSmsEnabled===true });
     if (endpoint === '/identity') return send(route, 200, { sub: employee.sub, email: employee.email });
-    if (endpoint === '/budget') return send(route, 200, options.budget || budget);
+    if (endpoint === '/budget') return send(route, 200, options.budgetRecord?.value || options.budget || budget);
+    if (endpoint === '/dashboard') {
+      const rows=options.rows||[record.reward],count=status=>rows.filter(row=>row.status===status).length;
+      const tiers=[500,1000,2000].map(valueCents=>({valueCents,count:rows.filter(row=>row.valueCents===valueCents).length}));
+      const total={registeredPlayers:new Set(rows.map(row=>row.phone)).size,recordedGames:options.recordedGames??rows.length,rewardsCount:rows.length,usedCount:count('issued'),activeCount:count('pending')+count('claimed'),expiredCount:count('expired'),valueCents:rows.reduce((sum,row)=>sum+row.valueCents,0)};
+      const month={month:'2026-11',usedValueCents:rows.filter(row=>row.status==='issued').reduce((sum,row)=>sum+row.valueCents,0),appliedValueCents:rows.reduce((sum,row)=>sum+(row.appliedValueCents||0),0),expiredValueCents:rows.filter(row=>row.status==='expired').reduce((sum,row)=>sum+row.valueCents,0),tiers};
+      return send(route,200,options.dashboard||{totals:total,month,tiers,budget:options.budgetRecord?.value||options.budget||budget,coverage:{gamesComplete:false,note:'Seuls les joueurs ayant une récompense sont enregistrés. Les parties libres ne sont pas enregistrées ; les statistiques portent sur les données conservées.'}});
+    }
+    if (endpoint === '/employees') return send(route,200,{employees:options.employees||[{...employee,active:true}]});
     if (endpoint === '/rewards') {
       let rows = options.rows || [record.reward];
       const code = url.searchParams.get('code');
+      const search=url.searchParams.get('search');
       const status = url.searchParams.get('status');
+      if(search){const fold=v=>String(v||'').normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim().replace(/\s+/g,' ');const digits=v=>{const d=String(v||'').replace(/\D/g,'');return d.length===10?'1'+d:d;};rows=rows.filter(row=>row.code.toUpperCase()===search.toUpperCase()||fold([row.firstName,row.lastName].join(' ')).includes(fold(search))||(digits(search).length>=10&&digits(row.phone)===digits(search)));}
       if (code) rows = rows.filter((row) => row.code === code);
       if (status) rows = rows.filter((row) => row.status === status);
       return send(route, 200, { rewards: rows, nextCursor: null });
@@ -54,18 +64,18 @@ async function mockApi(page, options = {}) {
     if (endpoint.endsWith('/claim') && request.method() === 'POST') {
       record.claims += 1;
       if (record.reward.status !== 'pending') return send(route, 409, { error: 'already_used', message: 'Ce code est déjà utilisé.' });
-      record.reward = { ...record.reward, status: 'claimed', claimedBy: employee.sub, claimedAt: '2026-11-14T14:00:00Z' };
+      record.reward = { ...record.reward, status: 'claimed', claimedBy: employee.sub, claimedAt: '2026-11-14T14:00:00Z', claimedByName: employee.name };
       const snapshot = { ...record.reward };
       if (options.claimGate) await options.claimGate.promise;
       return send(route, 200, { reward: snapshot });
     }
-    if (endpoint.endsWith('/issue') && request.method() === 'POST') {
-      record.issues += 1;
+    if (endpoint.endsWith('/use') && request.method() === 'POST') {
+      record.uses += 1;
       if (record.reward.status !== 'claimed' || record.reward.claimedBy !== employee.sub) return send(route, 409, { error: 'claim_owner', message: 'Seul l’employé responsable peut terminer.' });
       const body = request.postDataJSON();
-      assert.ok(body.lightspeedRef);
-      record.reward = { ...record.reward, status: 'issued', issuedBy: employee.sub, issuedAt: '2026-11-14T14:05:00Z', lightspeedRef: body.lightspeedRef };
-      if (options.issueGate) await options.issueGate.promise;
+      assert.deepEqual(body, { discountApplied: true,foodOnlyConfirmed:true,eligibleFoodCents:1000 });
+      record.reward = { ...record.reward, status: 'issued', issuedBy: employee.sub, issuedAt: '2026-11-14T14:05:00Z', discountApplied: true, foodOnlyConfirmed:true,eligibleFoodCents:1000,appliedValueCents:Math.min(record.reward.valueCents,1000),unusedCents:Math.max(0,record.reward.valueCents-1000), issuedByName: employee.name };
+      if (options.useGate) await options.useGate.promise;
       return send(route, 200, { reward: record.reward });
     }
     return send(route, 404, { error: 'test_route', message: 'Route de test non reconnue.' });
@@ -93,6 +103,11 @@ async function main() {
         await mockApi(page);
         await openReward(page, origin);
         await page.locator('#budget-remaining').filter({ hasText: '80,00' }).waitFor();
+        await page.locator('#overview-rewards').filter({hasText:'1'}).waitFor();
+        assert.equal(await page.locator('#overview-players').innerText(),'1');
+        assert.match(await page.locator('#overview-value').innerText(),/10,00/);
+        assert.match(await page.locator('#overview-coverage').innerText(),/parties libres ne sont pas enregistrées/);
+        assert.equal(await page.locator('#overview-tiers>div').count(),3);
         assert.match(await page.locator('#budget-total').innerText(), /100,00/);
         assert.match(await page.locator('#budget-used').innerText(), /10,00/);
         assert.equal(await page.locator('#budget-pending').innerText(), '1');
@@ -111,7 +126,7 @@ async function main() {
     await test('exact code search opens the result, identifies used or expired codes, and clears stale actions', async () => {
       for (const status of ['pending', 'claimed', 'issued', 'expired']) {
         const page = await browser.newPage();
-        await mockApi(page, { record: { reward: fixture({ status, claimedBy: status === 'claimed' ? employeeB.sub : null }), claims: 0, issues: 0 } });
+        await mockApi(page, { record: { reward: fixture({ status, claimedBy: status === 'claimed' ? employeeB.sub : null }), claims: 0, uses: 0 } });
         await page.goto(origin + '/admin/');
         await page.locator('#status-filter').selectOption('cancelled');
         await page.locator('#list-state').filter({ hasText: 'Aucune récompense trouvée' }).waitFor();
@@ -121,15 +136,15 @@ async function main() {
         assert.equal(await page.locator('#status-filter').inputValue(), '');
         assert.equal(await page.locator('#detail-code').innerText(), 'NOEL-TEST-0001');
         assert.match(await page.locator('#detail-facts').innerText(), /Date d’attribution/);
-        if (status === 'pending') assert.equal(await page.locator('#claim-button').innerText(), 'MARQUER COMME UTILISÉ');
+        if (status === 'pending') assert.equal(await page.locator('#claim-button').innerText(), 'PRENDRE EN CHARGE');
         else {
-          assert.equal(await page.locator('#detail-validation').innerText(), status === 'expired' ? 'CODE EXPIRÉ' : 'CODE DÉJÀ UTILISÉ');
+          assert.equal(await page.locator('#detail-validation').innerText(), status === 'expired' ? 'CODE EXPIRÉ' : status === 'claimed' ? 'CODE PRIS EN CHARGE' : 'CODE DÉJÀ UTILISÉ');
           assert.equal(await page.locator('#claim-button').count(), 0);
-          assert.equal(await page.locator('#issue-form').count(), 0);
+          assert.equal(await page.locator('#use-form').count(), 0);
         }
         await page.locator('#code-search').fill('NOT-A-CODE');
         await page.locator('#search-form button').click();
-        await page.locator('#list-state h3').filter({ hasText: 'CODE INTROUVABLE' }).waitFor();
+        await page.locator('#list-state h3').filter({ hasText: 'AUCUN RÉSULTAT' }).waitFor();
         assert.equal(await page.locator('#detail-content').isVisible(), false, 'previous code stayed actionable after failed search');
         await page.close();
       }
@@ -137,22 +152,25 @@ async function main() {
 
     await test('empty real registry shows zeros and no invented winners', async () => {
       const page = await browser.newPage();
-      await mockApi(page, { rows: [], budget: { ...budget, usedCents: 0, reservedCents: 0, remainingCents: 10000, pendingCount: 0, usedCount: 0 } });
+      await mockApi(page, { rows: [], budget: { ...budget, usedCents: 0, reservedCents: 0, remainingCents: 10000, pendingCount: 0, usedCount: 0, minimumBudgetCents: 0, minimumFutureBudgetCents: 0 } });
       await page.goto(origin + '/admin/');
       await page.locator('#budget-remaining').filter({ hasText: '100,00' }).waitFor();
       assert.equal(await page.locator('#budget-pending').innerText(), '0');
       assert.equal(await page.locator('#budget-used-count').innerText(), '0');
       assert.equal(await page.locator('#budget-reserved').isVisible(), false);
       assert.equal(await page.locator('.reward-row').count(), 0);
+      await page.locator('#overview-rewards').filter({hasText:'0'}).waitFor();
+      assert.equal(await page.locator('#overview-players').innerText(),'0');
+      assert.match(await page.locator('#overview-value').innerText(),/0,00/);
       await page.locator('#list-state').filter({ hasText: 'Aucun gagnant à afficher pour le moment.' }).waitFor();
       await page.close();
     });
 
-    await test('claim server success precedes Lightspeed form; concurrent employee receives 409; single issuance', async () => {
-      const record = { reward: fixture(), claims: 0, issues: 0 };
-      const claimGate = deferred(); const issueGate = deferred();
+    await test('claim server success precedes discount confirmation; concurrent employee receives 409; one completed discount', async () => {
+      const record = { reward: fixture(), claims: 0, uses: 0 };
+      const claimGate = deferred(); const useGate = deferred();
       const pageA = await browser.newPage(); const pageB = await browser.newPage();
-      await mockApi(pageA, { record, claimGate, issueGate });
+      await mockApi(pageA, { record, claimGate, useGate });
       await mockApi(pageB, { record, employee: employeeB });
       await openReward(pageA, origin); await openReward(pageB, origin);
       await pageA.locator('#claim-button').click();
@@ -160,34 +178,32 @@ async function main() {
       assert.match(await pageA.locator('#claim-summary').innerText(), /10,00/);
       await pageA.locator('#claim-confirm').click();
       await pageA.waitForFunction(() => document.getElementById('claim-confirm').disabled);
-      assert.equal(await pageA.locator('#issue-form').count(), 0, 'issue form shown before claim server success');
+      assert.equal(await pageA.locator('#use-form').count(), 0, 'issue form shown before claim server success');
       assert.equal(await pageA.locator('#notification').isVisible(), false);
       await pageA.keyboard.press('Escape');
       assert.equal(await pageA.locator('#claim-dialog').evaluate((dialog) => dialog.open), true, 'in-flight dialog escaped');
       await pageB.locator('#claim-button').click(); await pageB.locator('#claim-confirm').click();
       await pageB.locator('#notification.error').waitFor();
-      await pageB.locator('#detail-action').filter({ hasText: 'Remise déjà prise en charge' }).waitFor();
-      assert.equal(await pageB.locator('#issue-form').count(), 0, 'another employee can issue');
+      await pageB.locator('#detail-action').filter({ hasText: 'Code déjà pris en charge' }).waitFor();
+      assert.equal(await pageB.locator('#use-form').count(), 0, 'another employee can issue');
       assert.equal(await pageB.locator('#claim-button').count(), 0);
       claimGate.resolve();
-      await pageA.locator('#issue-confirm').waitFor({ state: 'visible' });
-      await pageA.waitForFunction(() => !document.getElementById('issue-confirm').disabled);
-      await pageA.locator('#issue-confirm').click();
-      assert.equal(record.issues, 0, 'blank issue confirmation accepted');
-      await pageA.locator('#lightspeed-ref').fill('LS-TEST-001');
-      await pageA.locator('#issue-confirm').click();
-      assert.equal(record.issues, 0, 'actual handover was not required');
-      await pageA.locator('#handover-confirm').check();
-      await pageA.locator('#issue-confirm').click();
-      await pageA.waitForFunction(() => document.getElementById('issue-confirm').disabled);
-      assert.doesNotMatch(await pageA.locator('#notification').innerText(), /remise.*enregistrée/);
-      issueGate.resolve();
-      await pageA.locator('#detail-action').filter({ hasText: 'Carte remise et enregistrée' }).waitFor();
-      assert.equal(record.claims, 2); assert.equal(record.issues, 1); assert.equal(record.reward.status, 'issued');
+      await pageA.locator('#use-confirm').waitFor({ state: 'visible' });
+      await pageA.waitForFunction(() => !document.getElementById('use-confirm').disabled);
+      await pageA.locator('#use-confirm').click();
+      assert.equal(record.uses, 0, 'blank issue confirmation accepted');
+      assert.equal(await pageA.locator('#lightspeed-ref').count(), 0);
+      await pageA.locator('#eligible-food-amount').fill('10');await pageA.locator('#food-only-confirm').check();await pageA.locator('#discount-confirm').check();
+      await pageA.locator('#use-confirm').click();
+      await pageA.waitForFunction(() => document.getElementById('use-confirm').disabled);
+      assert.doesNotMatch(await pageA.locator('#notification').innerText(), /rabais.*enregistrée/);
+      useGate.resolve();
+      await pageA.locator('#detail-action').filter({ hasText: 'Rabais appliqué et enregistré' }).waitFor();
+      assert.equal(record.claims, 2); assert.equal(record.uses, 1); assert.equal(record.reward.status, 'issued');
       assert.equal(record.reward.claimedBy, employeeA.sub); assert.equal(record.reward.issuedBy, employeeA.sub);
-      assert.equal(await pageA.locator('#claim-button').count(), 0); assert.equal(await pageA.locator('#issue-form').count(), 0);
+      assert.equal(await pageA.locator('#claim-button').count(), 0); assert.equal(await pageA.locator('#use-form').count(), 0);
       await pageB.locator('#refresh-button').click();
-      await pageB.locator('#detail-status').filter({ hasText: 'Carte remise' }).waitFor();
+      await pageB.locator('#detail-status').filter({ hasText: 'Utilisé · rabais appliqué' }).waitFor();
       await pageA.close(); await pageB.close();
     });
 
@@ -208,7 +224,7 @@ async function main() {
     await test('service failures, empty search, filters, and audit failure have clear states', async () => {
       const offline = await browser.newPage(); await mockApi(offline, { meStatus: 503 });
       await offline.goto(origin + '/admin/');
-      await offline.locator('#access-title').filter({ hasText: 'momentanément indisponible' }).waitFor();
+      await offline.locator('#access-title').filter({ hasText: 'Accès au registre indisponible' }).waitFor();
       assert.equal(await offline.locator('#access-retry').isVisible(), true); await offline.close();
       const page = await browser.newPage(); let failList = true;
       await mockApi(page, { intercept: async ({ endpoint, route, send }) => {
@@ -225,7 +241,7 @@ async function main() {
       await page.locator('.reward-row').click();
       await page.locator('#audit-state').filter({ hasText: 'momentanément indisponible' }).waitFor();
       await page.locator('#code-search').fill('NOT-A-CODE'); await page.locator('#search-form button').click();
-      await page.locator('#list-state h3').filter({ hasText: 'CODE INTROUVABLE' }).waitFor();
+      await page.locator('#list-state h3').filter({ hasText: 'AUCUN RÉSULTAT' }).waitFor();
       await page.locator('#code-search').fill(''); await page.locator('#status-filter').selectOption('issued');
       await page.locator('#list-state').filter({ hasText: 'Aucune récompense trouvée' }).waitFor();
       await page.locator('#status-filter').selectOption('pending');
@@ -233,7 +249,7 @@ async function main() {
       await page.close();
     });
 
-    await test('claim failure and cancel never report success or expose issuance', async () => {
+    await test('claim failure and cancel never report success or expose discount confirmation', async () => {
       const page = await browser.newPage(); let claims = 0;
       await mockApi(page, { intercept: async ({ endpoint, route, send }) => {
         if (endpoint.endsWith('/claim')) { claims += 1; await send(route, 500, { message: 'Validation temporairement indisponible.' }); return true; }
@@ -243,26 +259,26 @@ async function main() {
       assert.equal(claims, 0); assert.equal(await page.locator('#claim-dialog').evaluate((dialog) => dialog.open), false);
       await page.locator('#claim-button').click(); await page.locator('#claim-confirm').click();
       await page.locator('#claim-dialog-error').filter({ hasText: 'temporairement indisponible' }).waitFor();
-      assert.equal(await page.locator('#issue-form').count(), 0); assert.equal(await page.locator('#notification').isVisible(), false);
+      assert.equal(await page.locator('#use-form').count(), 0); assert.equal(await page.locator('#notification').isVisible(), false);
       await page.close();
     });
 
-    await test('issue failure preserves reference, warns against second card, and never reports success', async () => {
+    await test('use failure retains confirmation, warns against a second discount, and never reports success', async () => {
       const page = await browser.newPage();
-      await mockApi(page, { record: { reward: fixture({ status: 'claimed', claimedBy: employeeA.sub, claimedAt: '2026-11-14T14:00:00Z' }), claims: 0, issues: 0 }, intercept: async ({ endpoint, route, send }) => {
-        if (endpoint.endsWith('/issue')) { await send(route, 500, { message: 'Enregistrement indisponible.' }); return true; } return false;
+      await mockApi(page, { record: { reward: fixture({ status: 'claimed', claimedBy: employeeA.sub, claimedAt: '2026-11-14T14:00:00Z' }), claims: 0, uses: 0 }, intercept: async ({ endpoint, route, send }) => {
+        if (endpoint.endsWith('/use')) { await send(route, 500, { message: 'Enregistrement indisponible.' }); return true; } return false;
       } });
-      await openReward(page, origin); await page.locator('#lightspeed-ref').fill('LS-EXISTING-TEST'); await page.locator('#handover-confirm').check(); await page.locator('#issue-confirm').click();
-      await page.locator('#issue-error').filter({ hasText: 'ne créez pas de nouvelle carte' }).waitFor();
-      assert.equal(await page.locator('#lightspeed-ref').inputValue(), 'LS-EXISTING-TEST');
+      await openReward(page, origin); await page.locator('#eligible-food-amount').fill('10');await page.locator('#food-only-confirm').check();await page.locator('#discount-confirm').check(); await page.locator('#use-confirm').click();
+      await page.locator('#use-error').filter({ hasText: 'ne l’appliquez pas une deuxième fois' }).waitFor();
+      assert.equal(await page.locator('#discount-confirm').isChecked(), true);
       assert.equal(await page.locator('#notification').isVisible(), false);
       await page.close();
     });
 
-    await test('untrusted customer, code, audit actor, and Lightspeed text remain inert', async () => {
+    await test('untrusted customer, code, and audit actor remain inert', async () => {
       const page = await browser.newPage();
       const attack = '<img src=x onerror="window.adminXss=1">';
-      await mockApi(page, { record: { reward: fixture({ firstName: attack, code: '</button><script>window.adminXss=2</script>', status: 'issued', lightspeedRef: attack }), claims: 0, issues: 0 }, audit: [{ id: 'event-test', action: 'issued', actorName: attack, createdAt: '2026-11-14T14:00:00Z' }] });
+      await mockApi(page, { record: { reward: fixture({ firstName: attack, code: '</button><script>window.adminXss=2</script>', status: 'issued' }), claims: 0, uses: 0 }, audit: [{ id: 'event-test', action: 'issued', actorName: attack, createdAt: '2026-11-14T14:00:00Z' }] });
       await openReward(page, origin);
       await page.locator('#audit-list').filter({ hasText: attack }).waitFor();
       assert.equal(await page.evaluate(() => window.adminXss), undefined);
@@ -285,6 +301,234 @@ async function main() {
       assert.equal(await page.locator('#reward-list').innerText(), ''); assert.equal(await page.locator('#detail-name').innerText(), '');
       assert.equal(await page.evaluate(() => localStorage.length + sessionStorage.length), 0);
       await page.close();
+    });
+
+    await test('budget editing requires a manager and a complete successful GET', async () => {
+      const staff = await browser.newPage(); await mockApi(staff);
+      await staff.goto(origin + '/admin/');
+      await staff.locator('#budget-total').filter({ hasText: '100,00' }).waitFor();
+      assert.equal(await staff.locator('#budget-editor').isVisible(), false);
+      await staff.close();
+      for (const badBudget of [{ ...budget, revision: undefined }, { ...budget, remainingCents: 1 }]) {
+        const page = await browser.newPage();
+        await mockApi(page, { employee: employeeB, budget: badBudget });
+        await page.goto(origin + '/admin/');
+        await page.locator('#budget-error').waitFor();
+        assert.equal(await page.locator('#budget-total').innerText(), '—');
+        assert.equal(await page.locator('#budget-editor').isVisible(), false);
+        await page.close();
+      }
+      const gate = deferred(); const page = await browser.newPage();
+      await mockApi(page, { employee: employeeB, intercept: async ({ endpoint, request, route, send }) => {
+        if (endpoint === '/budget' && request.method() === 'GET') { await gate.promise; await send(route, 200, budget); return true; } return false;
+      } });
+      await page.goto(origin + '/admin/');
+      await page.locator('#admin-content').waitFor({ state: 'visible' });
+      assert.equal(await page.locator('#budget-editor').isVisible(), false);
+      gate.resolve(); await page.locator('#budget-editor').waitFor({ state: 'visible' });
+      await page.close();
+    });
+
+    await test('manager confirms month-only and future budgets; no optimistic success or overflow', async () => {
+      const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+      const budgetRecord = { value: { ...budget } }; const calls = []; const gate = deferred();
+      await mockApi(page, { employee: employeeB, budgetRecord, intercept: async ({ endpoint, request, route, send }) => {
+        if (endpoint !== '/budget' || request.method() !== 'PATCH') return false;
+        const body = request.postDataJSON(); calls.push(body);
+        if (calls.length === 1) await gate.promise;
+        budgetRecord.value = { ...budgetRecord.value, budgetCents: body.budgetCents, remainingCents: body.budgetCents - 2000, revision: budgetRecord.value.revision + 1,
+          ...(body.scope === 'current_and_future' ? { defaultBudgetCents: body.budgetCents, defaultRevision: budgetRecord.value.defaultRevision + 1 } : {}), updatedAt: '2026-11-15T16:00:00Z', updatedBy: employeeB.sub, updatedByName: employeeB.name };
+        await send(route, 200, budgetRecord.value); return true;
+      } });
+      await page.goto(origin + '/admin/'); await page.locator('#budget-editor').waitFor({ state: 'visible' });
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+      await page.locator('[data-budget-preset="100"]').click();
+      await page.locator('#budget-review').click();
+      await page.locator('#budget-cancel').click(); assert.equal(calls.length, 0);
+      await page.locator('[data-budget-preset="250"]').click(); await page.locator('#budget-review').click();
+      const summary = await page.locator('#budget-confirmation-summary').innerText();
+      assert.match(summary, /novembre 2026.*100,00.*250,00/);
+      assert.match(summary, /Ce mois-ci seulement.*reste à 100,00/s);
+      await page.locator('#budget-confirm').click();
+      await page.waitForFunction(() => document.getElementById('budget-confirm').disabled);
+      assert.match(await page.locator('#budget-total').innerText(), /100,00/);
+      assert.equal(await page.locator('#notification').isVisible(), false);
+      await page.keyboard.press('Escape'); assert.equal(await page.locator('#budget-dialog').evaluate((dialog) => dialog.open), true);
+      gate.resolve(); await page.locator('#budget-total').filter({ hasText: '250,00' }).waitFor();
+      await page.waitForFunction(() => !document.getElementById('budget-fields').disabled);
+      assert.match(await page.locator('#budget-future').innerText(), /100,00/);
+      assert.match(await page.locator('#budget-updated').innerText(), /Benoît Test/);
+      assert.deepEqual({ ...calls[0], requestId: '<generated>' }, { month: '2026-11', budgetCents: 25000, scope: 'month_only', expectedRevision: 0, expectedDefaultRevision: 0, requestId: '<generated>' });
+      assert.match(calls[0].requestId, /^[A-Za-z0-9_-]{16,128}$/);
+      await page.locator('#budget-amount').fill('150,50');
+      await page.locator('input[name="budget-scope"][value="current_and_future"]').check();
+      await page.locator('#budget-review').click();
+      assert.match(await page.locator('#budget-confirmation-summary').innerText(), /Ce mois-ci et les mois suivants.*100,00.*150,50/s);
+      await page.locator('#budget-confirm').click();
+      await page.locator('#budget-future').filter({ hasText: '150,50' }).waitFor();
+      assert.equal(calls[1].budgetCents, 15050); assert.equal(calls[1].expectedRevision, 1); assert.equal(calls[1].expectedDefaultRevision, 0);
+      await page.screenshot({ path: path.join(artifacts, 'admin-manager-budget-390.png'), fullPage: true });
+      await page.close();
+    });
+
+    await test('uncertain budget response retries the same persisted request after refresh', async () => {
+      const page = await browser.newPage(); const calls = []; const budgetRecord = { value: { ...budget } };
+      await mockApi(page, { employee: employeeB, budgetRecord, intercept: async ({ endpoint, request, route, send }) => {
+        if (endpoint !== '/budget' || request.method() !== 'PATCH') return false;
+        calls.push(request.postDataJSON());
+        budgetRecord.value = { ...budget, budgetCents: 25000, remainingCents: 23000, revision: 1 };
+        if (calls.length === 1) await route.abort('failed'); else await send(route, 200, budgetRecord.value);
+        return true;
+      } });
+      await page.goto(origin + '/admin/'); await page.locator('#budget-editor').waitFor({ state: 'visible' });
+      await page.locator('[data-budget-preset="250"]').click(); await page.locator('#budget-review').click(); await page.locator('#budget-confirm').click();
+      await page.locator('#budget-retry').waitFor({ state: 'visible' });
+      assert.equal(await page.locator('#budget-fields').evaluate(el=>el.disabled), true);assert.equal(await page.locator('#budget-amount').isDisabled(),true);
+      assert.equal(await page.locator('#notification').isVisible(), false);
+      await page.locator('#refresh-button').click();
+      await page.locator('#budget-total').filter({ hasText: '250,00' }).waitFor();
+      await page.locator('#budget-retry').click();
+      await page.locator('#notification').filter({ hasText: 'Budget enregistré' }).waitFor();
+      assert.deepEqual(calls[1], calls[0]);
+      await page.waitForFunction(() => !document.getElementById('budget-fields').disabled);
+      assert.equal(await page.locator('#budget-retry').isVisible(), false);
+      await page.close();
+    });
+
+    await test('budget conflict refreshes commitments and revisions without claiming success', async () => {
+      const page = await browser.newPage(); const budgetRecord = { value: { ...budget } }; const calls = [];
+      await mockApi(page, { employee: employeeB, budgetRecord, intercept: async ({ endpoint, request, route, send }) => {
+        if (endpoint !== '/budget' || request.method() !== 'PATCH') return false;
+        calls.push(request.postDataJSON());
+        budgetRecord.value = { ...budget, budgetCents: 25000, usedCents: 20000, reservedCents: 0, remainingCents: 5000, minimumBudgetCents: 20000, minimumFutureBudgetCents: 22000, revision: 2, defaultRevision: 1, defaultBudgetCents: 25000 };
+        await send(route, 409, { error: 'budget_conflict' }); return true;
+      } });
+      await page.goto(origin + '/admin/'); await page.locator('#budget-editor').waitFor({ state: 'visible' });
+      await page.locator('[data-budget-preset="250"]').click(); await page.locator('#budget-review').click(); await page.locator('#budget-confirm').click();
+      await page.locator('#budget-operation-error').filter({ hasText: 'autre responsable' }).waitFor();
+      assert.match(await page.locator('#budget-total').innerText(), /250,00/);
+      assert.match(await page.locator('#budget-commitments').innerText(), /200,00.*220,00/);
+      assert.equal(await page.locator('#notification').isVisible(), false);
+      await page.locator('[data-budget-preset="100"]').click(); await page.locator('#budget-review').click();
+      assert.equal(await page.locator('#budget-dialog').evaluate((dialog) => dialog.open), false);
+      assert.equal(calls.length, 1);
+      await page.locator('[data-budget-preset="250"]').click(); await page.locator('#budget-review').click(); await page.locator('#budget-confirm').click();
+      await page.locator('#budget-operation-error').waitFor();
+      assert.equal(calls[1].expectedRevision, 2); assert.equal(calls[1].expectedDefaultRevision, 1);
+      assert.notEqual(calls[1].requestId, calls[0].requestId);
+      await page.close();
+    });
+
+    await test('legacy issued rewards stay final without claiming that a discount was applied', async () => {
+      const page = await browser.newPage();
+      await mockApi(page, { record: { reward: fixture({ status: 'issued', discountApplied: false, issuedAt: '2026-11-14T14:05:00Z', issuedByName: employeeB.name }), claims: 0, uses: 0 } });
+      await openReward(page, origin);
+      assert.equal(await page.locator('#detail-status').innerText(), 'Déjà utilisé');
+      assert.doesNotMatch(await page.locator('#detail-facts').innerText(), /Rabais appliqué le/);
+      assert.equal(await page.locator('#use-form').count(), 0);
+      await page.close();
+    });
+    await test('manager reviews both explicit exceptions before generating a manual food-only code', async () => {
+      const page=await browser.newPage({viewport:{width:320,height:780}});const calls=[];
+      await mockApi(page,{employee:employeeB,intercept:async({endpoint,request,route,send})=>{
+        if(endpoint==='/manual-rewards/quote'){await send(route,200,{budgetCents:10000,usedCents:10000,reservedCents:0,valueCents:2000,projectedOverrunCents:2000,additionalExceptionalCents:2000,cooldownRequired:true,manualRewardsEnabled:true,quote:{month:'2026-11',budgetCents:10000,usedCents:10000,reservedCents:0,revision:0,lastRewardId:'previous'}});return true;}
+        if(endpoint==='/manual-rewards'){calls.push(request.postDataJSON());await send(route,200,{reward:fixture({source:'manual',score:null,code:'GOAT-FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF'}),notification:{status:'disabled'}});return true;}
+        return false;
+      }});
+      await page.goto(origin+'/admin/');await page.locator('.manual-panel').waitFor();
+      for(const [key,value] of Object.entries({firstName:'Camille',lastName:'Essai',phone:'+15145551234',reason:'Décision du gestionnaire'}))await page.locator('.manual-form input[name="'+key+'"]').fill(value);
+      await page.locator('.manual-form select').selectOption('2000');await page.locator('.manual-form button').click();
+      const confirm=page.getByRole('button',{name:'Confirmer et générer le code unique'});await confirm.waitFor();await confirm.click();assert.equal(calls.length,0);
+      assert.match(await page.locator('.manual-panel').innerText(),/Dépassement total après émission/);
+      await page.locator('.manual-panel input[type=checkbox]').nth(0).check();await page.locator('.manual-panel input[type=checkbox]').nth(1).check();
+      await page.locator('.manual-panel textarea').nth(0).fill('Budget exceptionnel autorisé');await page.locator('.manual-panel textarea').nth(1).fill('Délai exceptionnel autorisé');await confirm.click();
+      await page.getByText('Code : GOAT-FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF',{exact:true}).waitFor();assert.equal(calls.length,1);assert.equal(calls[0].authorizeBudgetOverrun,true);assert.equal(calls[0].authorizeCooldown,true);assert.equal(calls[0].valueCents,2000);
+      assert.match(await page.locator('.page-intro').innerText(),/uniquement aux aliments.*boissons alcooliques/s);
+      assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),'manual issuance overflows 320px');
+      await page.screenshot({path:path.join(artifacts,'admin-manual-food-320.png'),fullPage:true});await page.close();
+    });
+    await test('standard staff flow never exposes test consumption even when technical metadata is present',async()=>{
+      const page=await browser.newPage(),calls=[];
+      const reward=fixture({status:'claimed',claimedBy:employeeA.sub,claimedByName:employeeA.name});
+      await mockApi(page,{previewTestRedemption:true,record:{reward,claims:0,uses:0},intercept:async({endpoint,request})=>{if(endpoint.endsWith('/use'))calls.push(request.postDataJSON());return false;}});
+      await openReward(page,origin);assert.equal(await page.locator('#eligible-food-amount').count(),1);
+      assert.doesNotMatch(await page.locator('#use-form').innerText(),/Preview|essai|simulation/i);
+      await page.locator('#discount-confirm').check();await page.locator('#use-confirm').click();assert.equal(calls.length,0);
+      await page.locator('#eligible-food-amount').fill('10');await page.locator('#food-only-confirm').check();await page.locator('#use-confirm').click();
+      await page.locator('#notification').filter({hasText:'L’application du rabais sur la facture est enregistrée'}).waitFor();
+      assert.deepEqual(calls,[{discountApplied:true,foodOnlyConfirmed:true,eligibleFoodCents:1000}]);await page.close();
+    });
+    await test('name and declared phone search finds every customer reward, with no SMS action at launch',async()=>{
+      const page=await browser.newPage({viewport:{width:390,height:844}}),searches=[];
+      const rows=[fixture({id:'emilie-pending',firstName:'Émilie',lastName:'Noël',code:'GOAT-EMILIE-1'}),fixture({id:'emilie-used',firstName:'Émilie',lastName:'Noël',code:'GOAT-EMILIE-2',status:'issued'}),fixture({id:'other',firstName:'Autre',lastName:'Client',phone:'+15145551235',code:'GOAT-OTHER'})];
+      await mockApi(page,{rows,intercept:async({endpoint,url})=>{if(endpoint==='/rewards')searches.push(url.searchParams.get('search'));return false;}});
+      await page.goto(origin+'/admin/');await page.locator('.reward-row').first().waitFor();
+      await page.locator('#code-search').fill('emilie noel');await page.locator('#search-form button').click();
+      await page.waitForFunction(()=>document.querySelectorAll('.reward-row').length===2);assert.equal(searches.at(-1),'emilie noel');
+      await page.locator('.reward-row').first().click();assert.match(await page.locator('#detail-facts').innerText(),/Téléphone fourni.*\+15145551234/s);assert.match(await page.locator('#detail-facts').innerText(),/Numéro déclaré, non vérifié par SMS/);
+      assert.equal(await page.getByRole('button',{name:'Renvoyer le SMS du code'}).count(),0);
+      await page.locator('#code-search').fill('(514) 555-1234');await page.locator('#search-form button').click();
+      await page.waitForFunction(()=>document.querySelectorAll('.reward-row').length===2);assert.equal(searches.at(-1),'(514) 555-1234');
+      await page.locator('.reward-row').nth(1).click();assert.equal(await page.locator('#detail-code').innerText(),'GOAT-EMILIE-2');
+      assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth));await page.close();
+    });
+    await test('declared phone text is inert and SMS tools require explicit enabled metadata',async()=>{
+      const page=await browser.newPage(),attack='<img src=x onerror="window.phoneXss=1">';
+      await mockApi(page,{record:{reward:fixture({phone:attack}),claims:0,uses:0}});await openReward(page,origin);
+      assert.ok((await page.locator('#detail-facts').innerText()).includes(attack));assert.equal(await page.evaluate(()=>window.phoneXss),undefined);assert.equal(await page.locator('#detail-facts img').count(),0);await page.close();
+      const sms=await browser.newPage();await mockApi(sms,{notificationSmsEnabled:true,phoneVerificationMode:'sms'});await openReward(sms,origin);assert.equal(await sms.getByRole('button',{name:'Renvoyer le SMS du code'}).count(),1);await sms.close();
+    });
+    await test('manager sees eligibility and duplicate signals and authorizes a justified shared-device unlock',async()=>{
+      const page=await browser.newPage({viewport:{width:390,height:844}}),calls=[];let unlocked=false;
+      await mockApi(page,{employee:employeeB,intercept:async({endpoint,request,route,send})=>{
+        if(endpoint.endsWith('/eligibility')){await send(route,200,{potentialDuplicate:true,phone:{blocked:true,nextEligibleAt:'2026-12-14T12:00:00Z'},device:{tracked:true,blocked:!unlocked,nextEligibleAt:'2026-12-14T12:00:00Z',exceptionAvailable:unlocked,exceptionExpiresAt:'2026-11-16T12:00:00Z'},history:[{code:'GOAT-HISTORIQUE',fullName:'Camille Essai',valueCents:1000,confirmedAt:'2026-11-14T12:00:00Z'}],signals:[{createdAt:'2026-11-15T12:00:00Z',reason:'device_cooldown',differentName:true}]});return true;}
+        if(endpoint.endsWith('/unlock')){calls.push(request.postDataJSON());unlocked=true;await send(route,200,{exceptions:[{scope:'device'}]});return true;}return false;
+      }});
+      await openReward(page,origin);await page.locator('#unlock-confirm').waitFor();assert.match(await page.locator('#eligibility-section').innerText(),/Doublon potentiel/);
+      await page.locator('#unlock-confirm').click();assert.equal(calls.length,0);await page.locator('#unlock-scope').selectOption('device');await page.locator('#unlock-reason').fill('Appareil partagé au restaurant');await page.locator('#unlock-confirm').click();
+      await page.locator('#notification').filter({hasText:'Déblocage exceptionnel enregistré'}).waitFor();await page.locator('#eligibility-section').filter({hasText:'déblocage autorisé'}).waitFor();assert.equal(calls.length,1);assert.equal(calls[0].scope,'device');assert.equal(calls[0].reason,'Appareil partagé au restaurant');await page.close();
+    });
+    await test('failed dashboard never fabricates statistics and refresh recovers real values',async()=>{
+      const page=await browser.newPage();let offline=true;
+      await mockApi(page,{intercept:async({endpoint,route,send})=>{if(endpoint==='/dashboard'&&offline){await send(route,503,{error:'service_unavailable'});return true;}return false;}});
+      await page.goto(origin+'/admin/');await page.locator('#overview-error').waitFor();
+      assert.equal(await page.locator('#overview-rewards').innerText(),'—');assert.equal(await page.locator('#overview-value').innerText(),'—');
+      assert.match(await page.locator('#overview-coverage').innerText(),/Aucun chiffre estimé/);
+      offline=false;await page.locator('#overview-refresh').click();await page.locator('#overview-rewards').filter({hasText:'1'}).waitFor();assert.equal(await page.locator('#overview-error').isVisible(),false);await page.close();
+    });
+    await test('manager can authorize, disable and reactivate staff while own account stays protected',async()=>{
+      const page=await browser.newPage({viewport:{width:390,height:844}}),calls=[],employees=[{...employeeB,active:true}];
+      await mockApi(page,{employee:employeeB,audit:[{action:'employee_created',actorName:employeeB.name,createdAt:'2026-11-14T14:00:00Z',details:{email:'service@example.test',name:'Employé autorisé'}}],intercept:async({endpoint,request,route,send})=>{
+        if(endpoint!=='/employees')return false;
+        if(request.method()==='POST'){const body=request.postDataJSON();calls.push(body);assert.equal(body.role,'staff');employees.push({sub:'invite:'+body.email,...body,active:true});await send(route,201,{employee:employees.at(-1)});return true;}
+        if(request.method()==='PATCH'){const body=request.postDataJSON();calls.push(body);const target=employees.find(item=>item.sub===body.sub);target.active=body.active;await send(route,200,{employee:target});return true;}
+        await send(route,200,{employees});return true;
+      }});
+      await page.goto(origin+'/admin/');await page.locator('#employees-panel').waitFor();await page.locator('#employees-panel summary').click();
+      assert.equal(await page.getByText('Votre compte',{exact:true}).count(),1);assert.equal(await page.locator('#employee-list button').count(),0);
+      await page.locator('#operations-panel summary').click();await page.locator('#operations-list').filter({hasText:'Employé autorisé'}).waitFor();assert.match(await page.locator('#operations-panel').innerText(),/200 dernières opérations/);assert.match(await page.locator('#operations-list').innerText(),/Benoît Test/);assert.match(await page.locator('#operations-list').innerText(),/service@example.test/);
+      await page.locator('#employee-add-name').fill('Employé autorisé');await page.locator('#employee-add-email').fill('service@example.test');await page.locator('#employee-add-confirm').click();
+      await page.locator('#employee-list').filter({hasText:'service@example.test'}).waitFor();assert.equal(calls.length,1);
+      await page.getByRole('button',{name:'Désactiver',exact:true}).click();await page.locator('#employee-confirm').click();await page.getByRole('button',{name:'Réactiver',exact:true}).waitFor();assert.equal(calls[1].active,false);
+      await page.getByRole('button',{name:'Réactiver',exact:true}).click();await page.locator('#employee-confirm').click();await page.getByRole('button',{name:'Désactiver',exact:true}).waitFor();assert.equal(calls[2].active,true);
+      assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await page.screenshot({path:path.join(artifacts,'admin-employees-390.png'),fullPage:true});await page.close();
+      const staff=await browser.newPage();await mockApi(staff);await staff.goto(origin+'/admin/');await staff.locator('.reward-row').waitFor();assert.equal(await staff.locator('#employees-panel').isVisible(),false);assert.equal(await staff.locator('#operations-panel').isVisible(),false);assert.equal(await staff.locator('#manual-reward-panel').count(),0);await staff.close();
+    });
+    await test('retry establishes manager tools; expiry clears pending staff operations and stale private data',async()=>{
+      const page=await browser.newPage();let unavailable=true,role=employeeB,expire=false,staffWriteStarted=false;const staffWriteGate=deferred();
+      await mockApi(page,{employee:employeeB,intercept:async({endpoint,request,route,send})=>{
+        if(endpoint==='/me'){await send(route,unavailable?503:200,unavailable?{error:'admin_unavailable'}:{employee:role});return true;}
+        if(endpoint==='/employees'&&request.method()==='POST'){staffWriteStarted=true;await staffWriteGate.promise;await send(route,201,{employee:{sub:'invite:private@example.test',email:'private@example.test',name:'Ancienne saisie',active:true,role:'staff'}});return true;}
+        if(endpoint==='/rewards'&&expire){await send(route,401,{error:'unauthorized'});return true;}return false;
+      }});
+      await page.goto(origin+'/admin/');await page.locator('#access-retry').waitFor();assert.equal(await page.locator('#manual-reward-panel').count(),0);
+      unavailable=false;await page.locator('#access-retry').click();await page.locator('#manual-reward-panel').waitFor();
+      await page.locator('#manual-reward-panel input[name=firstName]').fill('Donnée privée');await page.locator('#employees-panel summary').click();await page.locator('#employee-add-name').fill('Ancienne saisie');await page.locator('#employee-add-email').fill('private@example.test');await page.locator('#employee-add-confirm').click();
+      await page.waitForFunction(()=>document.getElementById('employee-add-confirm').disabled);assert.equal(staffWriteStarted,true);expire=true;
+      await page.locator('#refresh-button').click();await page.locator('#access-title').filter({hasText:'Connectez-vous'}).waitFor();assert.equal(await page.locator('#manual-reward-panel').count(),0);assert.equal(await page.locator('#employee-add-email').inputValue(),'');assert.equal(await page.locator('#employee-list').innerText(),'');assert.equal(await page.locator('#overview-rewards').innerText(),'—');
+      expire=false;await page.evaluate(()=>window.dispatchEvent(new PageTransitionEvent('pageshow',{persisted:true})));await page.locator('#manual-reward-panel').waitFor();await page.locator('#employees-panel summary').click();assert.equal(await page.locator('#employee-add-confirm').isEnabled(),true);assert.equal(await page.locator('#employee-add-email').isEnabled(),true);assert.equal(await page.locator('#employee-add-email').inputValue(),'');
+      staffWriteGate.resolve();await page.waitForTimeout(40);assert.doesNotMatch(await page.locator('#employee-list').innerText(),/private@example.test|Ancienne saisie/);
+      role=employeeA;await page.evaluate(()=>window.dispatchEvent(new PageTransitionEvent('pageshow',{persisted:true})));await page.locator('.reward-row').waitFor();assert.equal(await page.locator('#manual-reward-panel').count(),0);assert.equal(await page.locator('#employees-panel').isVisible(),false);await page.close();
     });
     process.stdout.write(checks + ' admin browser checks passed. Screenshots: ' + artifacts + '\n');
   } finally { await browser.close(); await new Promise((resolve) => server.close(resolve)); }

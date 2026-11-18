@@ -8,7 +8,7 @@ const {spawn}=require('node:child_process');
 const root=path.resolve(__dirname,'..');
 const origin='http://127.0.0.1:8768';
 const artifactDir=path.join(root,'artifacts/noel-home');
-const viewports=[{width:390,height:844},{width:320,height:568},{width:620,height:900},{width:844,height:390}];
+const viewports=[{width:390,height:844},{width:320,height:568},{width:620,height:900},{width:768,height:1024},{width:844,height:390},{width:1366,height:768},{width:1440,height:900}];
 const results=[],geometry=[];
 const check=(condition,message)=>{assert.ok(condition,message);results.push(message);console.log('PASS',message)};
 const hash=content=>createHash('sha256').update(content).digest('hex');
@@ -38,12 +38,12 @@ function instrument(html){
  return html.slice(0,end)+'\n'+hook+html.slice(end);
 }
 function drawTracker(){
- window.__homeHeroDraws=[];window.__sleighDraws=[];
+ window.__homeHeroDraws=[];window.__gameHeroDraws=[];window.__sleighDraws=[];
  const opaqueBounds=new WeakMap(),original=CanvasRenderingContext2D.prototype.drawImage;
  CanvasRenderingContext2D.prototype.drawImage=function(...args){
   const source=args[0],isHero=source instanceof HTMLCanvasElement&&/jacques-noel/.test(source.dataset.sourceAsset||'');
   const isSleigh=source===window.BorealNoelSleigh?.image||source===window.BorealNoelSleigh?.sprite||/santa-sleigh-six-reindeer/.test(source.currentSrc||source.src||source.dataset?.sourceAsset||source.dataset?.decorativeKind||'');
-  if(this.canvas.id==='game'&&(isHero||isSleigh)){
+  if(['game','boreal-home-art'].includes(this.canvas.id)&&(isHero||isSleigh)){
    const matrix=this.getTransform(),canvasBounds=this.canvas.getBoundingClientRect();
    let sourceBounds=opaqueBounds.get(source);
    if(!sourceBounds&&isHero){
@@ -64,8 +64,8 @@ function drawTracker(){
    const ratio=this.canvas.width/canvasBounds.width;
    const left=Math.min(...points.map(p=>p.x))/ratio+canvasBounds.left,top=Math.min(...points.map(p=>p.y))/ratio+canvasBounds.top;
    const right=Math.max(...points.map(p=>p.x))/ratio+canvasBounds.left,bottom=Math.max(...points.map(p=>p.y))/ratio+canvasBounds.top;
-   const record={left,top,right,bottom,width:right-left,height:bottom-top,scaleX:Math.hypot(matrix.a,matrix.b)/ratio,scaleY:Math.hypot(matrix.c,matrix.d)/ratio,frame:source.dataset?.frame,source:source.currentSrc||source.src||source.dataset?.sourceAsset||'',mode:window.noelHomeTest?.state().mode};
-   const draws=isHero?window.__homeHeroDraws:window.__sleighDraws;draws.push(record);if(draws.length>300)draws.shift();
+   const record={canvasId:this.canvas.id,left,top,right,bottom,width:right-left,height:bottom-top,scaleX:Math.hypot(matrix.a,matrix.b)/ratio,scaleY:Math.hypot(matrix.c,matrix.d)/ratio,frame:source.dataset?.frame,source:source.currentSrc||source.src||source.dataset?.sourceAsset||'',mode:window.noelHomeTest?.state().mode};
+   const draws=isHero?(this.canvas.id==='boreal-home-art'?window.__homeHeroDraws:window.__gameHeroDraws):window.__sleighDraws;draws.push(record);if(draws.length>300)draws.shift();
   }
   return original.apply(this,args);
  };
@@ -104,23 +104,31 @@ const canvasHash=page=>page.evaluate(async()=>{
    await page.goto(origin+'/v3/__home_test__.html');await ready(page);await page.waitForTimeout(150);
    check(await page.locator('#home img').count()===0,`aucun logo dans le menu ${viewport.width}×${viewport.height}`);
    check(await page.locator('.boreal-credit').innerText()==='Un jeu imaginé et développé par GOAT Agence',`signature textuelle conservée ${viewport.width}×${viewport.height}`);
-   check(await page.locator('#home .tips').isVisible()&&await page.locator('#home .tip').count()===3,`indications de jeu visibles ${viewport.width}×${viewport.height}`);
-   check((await page.locator('.boreal-reward-info').innerText()).includes('Mode libre — sans récompense'),`mode libre annoncé sans promesse ${viewport.width}×${viewport.height}`);
-   await page.evaluate(()=>noelHomeTest.drawHero());
+   check(await page.locator('#home .tip').count()===3&&await page.locator('#how').isVisible(),`conseils et accès au guide conservés ${viewport.width}×${viewport.height}`);
+   check((await page.locator('#boreal-home-mode').innerText()).includes('Mode libre — sans récompense'),`mode libre annoncé sans promesse ${viewport.width}×${viewport.height}`);
+   await page.waitForFunction(()=>window.__homeHeroDraws.length>0,undefined,{polling:20});
    const hero=await page.evaluate(()=>window.__homeHeroDraws.at(-1));
-   const title=await page.locator('#home h1').boundingBox(),start=await page.locator('#start').boundingBox(),how=await page.locator('#how').boundingBox(),reward=await page.locator('.boreal-reward-info').boundingBox();
+   const title=await page.locator('#home h1').boundingBox(),start=await page.locator('#start').boundingBox(),how=await page.locator('#how').boundingBox(),shell=await page.locator('.boreal-home-shell').boundingBox(),copy=await page.locator('.boreal-home-copy').boundingBox(),scene=await page.locator('.boreal-home-scene').boundingBox();
    const label=`${viewport.width}×${viewport.height}`;
-   check(hero&&hero.mode==='home'&&hero.left>=0&&hero.top>=0&&hero.right<=viewport.width&&hero.bottom<=viewport.height,`Jacques entièrement visible au menu ${label}`);
+   check(hero&&hero.canvasId==='boreal-home-art'&&hero.mode==='home'&&hero.left>=0&&hero.top>=0&&hero.right<=viewport.width&&hero.bottom<=viewport.height,`Jacques entièrement visible dans le décor d’accueil ${label}`);
    check(!overlaps(hero,title)&&!overlaps(hero,start)&&!overlaps(hero,how),`Jacques ne chevauche ni titre ni boutons ${label}`);
-   check(!overlaps(hero,reward),`la carte de récompenses ne recouvre pas Jacques ${label}`);
-   for(const id of ['start','how','boreal-open-rules','rewardRecover']){await page.locator('#'+id).scrollIntoViewIfNeeded();const box=await page.locator('#'+id).boundingBox();check(box&&box.x>=-1&&box.y>=-1&&box.x+box.width<=viewport.width+1&&box.y+box.height<=viewport.height+1,`bouton ${id} accessible par défilement ${label}`)}
-   await page.evaluate(()=>{document.querySelector('#home').scrollTop=0;window.dispatchEvent(new Event('boreal:menu-layout'));noelHomeTest.draw()});
-   if(viewport.height>viewport.width)check(hero.height>80*1.45&&hero.bottom>title.y+title.height*.75,`Jacques conserve sa grande taille de menu à côté du titre ${label}`);
-   geometry.push({viewport,hero,title,start,how,reward});
+   check(hero.height>70&&hero.left>=scene.x-1&&hero.right<=scene.x+scene.width+1&&hero.top>=scene.y-1&&hero.bottom<=scene.y+scene.height+1,`Jacques occupe la zone de décor réservée ${label}`);
+   check(start&&start.x>=0&&start.y>=0&&start.x+start.width<=viewport.width&&start.y+start.height<=viewport.height,`JOUER visible sans défilement ${label}`);
+   check(await page.locator('#start').innerText()==='JOUER',`action principale claire ${label}`);
+   check(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth&&document.querySelector('#home').scrollWidth<=innerWidth),`aucun défilement horizontal ${label}`);
+   if(viewport.width>=1200)check(shell.width>1000&&copy.x+copy.width<=scene.x+12&&scene.width>viewport.width*.3,`composition ordinateur large et horizontale ${label}`);
+   for(const id of ['how','boreal-open-rules','rewardRecover']){await page.locator('#'+id).scrollIntoViewIfNeeded();const box=await page.locator('#'+id).boundingBox();check(box&&box.x>=-1&&box.y>=-1&&box.x+box.width<=viewport.width+1&&box.y+box.height<=viewport.height+1,`bouton ${id} accessible ${label}`)}
+   await page.evaluate(()=>{document.querySelector('#home').scrollTop=0;window.dispatchEvent(new Event('boreal:menu-layout'))});
+   geometry.push({viewport,hero,title,start,how,shell,copy,scene});
    await page.screenshot({path:path.join(artifactDir,`menu-${viewport.width}x${viewport.height}.png`)});
+   await page.locator('#boreal-open-rules').click();
+   check(await page.locator('#boreal-rules').isVisible()&&(await page.locator('#boreal-rules').innerText()).includes('Une seule récompense par personne tous les 30 jours'),`règlement et limite de gain accessibles avant de jouer ${label}`);
+   await page.keyboard.press('Escape');
+   check(!await page.locator('#boreal-rules').isVisible()&&await page.locator('#boreal-open-rules').evaluate(node=>node===document.activeElement),`fermeture du règlement et restitution du focus ${label}`);
    await page.click('#start');await page.waitForFunction(()=>noelHomeTest.state().mode==='playing',undefined,{polling:20});await page.evaluate(()=>{noelHomeTest.quiet();noelHomeTest.drawHero()});
-   const gameHero=await page.evaluate(()=>window.__homeHeroDraws.at(-1));
+   const gameHero=await page.evaluate(()=>window.__gameHeroDraws.at(-1));
    check(gameHero.mode==='playing'&&Math.abs(gameHero.scaleX-1)<1e-8&&Math.abs(gameHero.scaleY-1)<1e-8,`taille de Jacques en partie inchangée ${label}`);
+   check(await page.locator('#game').evaluate((node,width)=>Math.abs(node.getBoundingClientRect().width-Math.min(width,620))<1,viewport.width),`largeur du jeu conservée malgré l’accueil immersif ${label}`);
    await page.click('#pauseBtn');await page.waitForTimeout(100);const before=await canvasHash(page);
    await page.waitForTimeout(250);check(before===await canvasHash(page),`pause fige tous les pixels du décor ${label}`);
    await page.click('#resume');await page.waitForTimeout(100);

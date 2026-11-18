@@ -1,3 +1,7 @@
+**Version actuelle : lancement sans SMS, jeu illimité, contrôles téléphone/navigateur et accès du personnel par courriel. Voir [la procédure actuelle](docs/LANCEMENT-SANS-SMS.md). Les descriptions SMS ci-dessous concernent désormais le mode optionnel futur.**
+
+**Développement récompenses alimentaires (15 novembre 2026) :** voir [budget configurable, exceptions, administration, SQL et SMS](docs/AUDIT-BUDGET-CONFIGURABLE.md). Branche `develop/noel-budget-configurable`, gains désactivés, production inchangée.
+
 # Le Défi Boréal — Édition de Noël et récompenses
 
 Développement sur `develop/noel-recompenses-v1`, depuis Noël `080fe40`. La production `livraison-v3` reste séparée.

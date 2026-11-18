@@ -6,13 +6,14 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { generateKeyPairSync, randomBytes, sign } = require('node:crypto');
 const { Miniflare, convertV4MiniflareOptions } = require('miniflare');
+const { migrateD1 } = require('./helpers/migrations.cjs');
 
 const root = path.resolve(__dirname, '..');
 const origin = 'https://rewards-workerd.example';
 const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures/game-session-winning-rewards.json'), 'utf8'));
 const bindings = {
-  APP_ORIGIN: origin,
-  REWARDS_ENABLED: 'true', SMS_APPROVED: 'true', TERMS_APPROVED: 'true',
+  APP_ORIGIN: origin, PHONE_VERIFICATION_MODE:'sms',
+  REWARDS_ENABLED: 'true', SMS_APPROVED: 'true', TERMS_APPROVED: 'true', MANUAL_REWARDS_ENABLED:'true',NOTIFICATION_SMS_ENABLED:'true',NOTIFICATION_SMS_DAILY_LIMIT:'10',TWILIO_MESSAGING_SERVICE_SID:'MG'+'4'.repeat(32),
   SMS_PROVIDER: 'twilio', SMS_DAILY_LIMIT: '100',
   REWARDS_HMAC_SECRET: 'local-integration-only-hmac-secret-with-32-bytes',
   TURNSTILE_SITE_KEY: 'local-integration-site-key', TURNSTILE_SECRET: 'local-integration-turnstile-secret',
@@ -25,7 +26,7 @@ const keys = generateKeyPairSync('rsa', { modulusLength: 2048 });
 const publicJwk = { ...keys.publicKey.export({ format: 'jwk' }), kid: 'integration-key', alg: 'RS256', use: 'sig' };
 const providerSid = `VE${'3'.repeat(32)}`;
 const phone = '+15145551234';
-const calls = { turnstile: 0, keys: 0, sms: 0, check: 0 };
+const calls = { notification:0, turnstile: 0, keys: 0, sms: 0, check: 0 };
 const redirects = { turnstile: false, keys: false, sms: false, check: false };
 const unexpectedOutbound = [];
 const redirect = () => new Response(null, { status: 302, headers: { Location: 'https://must-not-follow.example/private' } });
@@ -53,6 +54,7 @@ async function outbound(request) {
     if (redirects.turnstile) return redirect();
     return Response.json({ success: true, hostname: new URL(origin).hostname, action: 'boreal-session', challenge_ts: new Date().toISOString() });
   }
+  if(url.origin==='https://api.twilio.com'){calls.notification++;const params=new URLSearchParams(await request.text());assert.equal(params.get('To'),phone);assert.ok(params.get('Body').includes('Applicable exclusivement sur les aliments'));return Response.json({sid:'SM'+'5'.repeat(32),account_sid:bindings.TWILIO_ACCOUNT_SID,to:phone,status:'queued'});}
   const base = `https://verify.twilio.com/v2/Services/${bindings.TWILIO_VERIFY_SERVICE_SID}/`;
   if (url.href === base + 'Verifications') {
     calls.sms++;
@@ -75,19 +77,120 @@ async function outbound(request) {
   throw new Error(`Unexpected outbound request: ${url.origin}${url.pathname}`);
 }
 
-async function migrate(DB) {
-  const triggers = [];
-  // D1.exec splits newlines. Keep each trigger's BEGIN...END body in one
-  // prepared D1 statement, retaining the migration's original statement order.
-  const schema = fs.readFileSync(path.join(root, 'migrations/0001_rewards.sql'), 'utf8')
-    .replace(/CREATE TRIGGER\b[\s\S]*?\nEND;/g, sql => `__TRIGGER_${triggers.push(sql) - 1}__;`);
-  for (const part of schema.split(';')) {
-    let sql = part.trim();
-    if (!sql) continue;
-    const trigger = /^__TRIGGER_(\d+)__$/.exec(sql);
-    if (trigger) sql = triggers[Number(trigger[1])];
-    await DB.prepare(sql).run();
-  }
+async function noSmsLaunchIntegration(script) {
+  const trialBindings={
+    APP_ORIGIN:origin,REWARDS_ENABLED:'true',TERMS_APPROVED:'true',
+    PHONE_VERIFICATION_MODE:'unverified',SMS_APPROVED:'false',SMS_DAILY_LIMIT:'0',NOTIFICATION_SMS_ENABLED:'false',
+    REWARDS_HMAC_SECRET:bindings.REWARDS_HMAC_SECRET,
+    TURNSTILE_SITE_KEY:bindings.TURNSTILE_SITE_KEY,TURNSTILE_SECRET:bindings.TURNSTILE_SECRET,
+    ACCESS_TEAM_DOMAIN:bindings.ACCESS_TEAM_DOMAIN,ACCESS_AUD:bindings.ACCESS_AUD,
+  };
+  const forbidden=[];
+  const mfLaunch=new Miniflare(convertV4MiniflareOptions({
+    modules:[{type:'ESModule',path:'_worker.js',contents:script}],compatibilityDate:'2026-11-14',
+    compatibilityFlags:['no_nodejs_compat','no_nodejs_compat_v2'],cf:false,
+    bindings:trialBindings,d1Databases:['DB'],d1Persist:false,
+    outboundService:async request=>{
+      const url=new URL(request.url);
+      if(url.origin===`https://${bindings.ACCESS_TEAM_DOMAIN}`&&url.pathname==='/cdn-cgi/access/certs')return Response.json({keys:[publicJwk]});
+      if(url.href==='https://challenges.cloudflare.com/turnstile/v0/siteverify')return Response.json({success:true,hostname:new URL(origin).hostname,action:'boreal-session',challenge_ts:new Date().toISOString()});
+      forbidden.push(url.origin+url.pathname);throw Error('Launch must never contact SMS services');
+    },serviceBindings:{ASSETS:async()=>new Response('local-static-asset')},
+  }));
+  const request=(pathname,body,headers={})=>mfLaunch.dispatchFetch(origin+pathname,{
+    method:body===undefined?'GET':'POST',headers:{...(body===undefined?{}:{Origin:origin,'Sec-Fetch-Site':'same-origin','Content-Type':'application/json'}),...headers},
+    ...(body===undefined?{}:{body:JSON.stringify(body)}),
+  });
+  const json=async response=>{const value=await response.json();assert.equal(response.status,200,JSON.stringify(value));return value;};
+  try {
+    const DB=await mfLaunch.getD1Database('DB');await migrateD1(DB);
+    await DB.batch([
+      DB.prepare("INSERT INTO employees(sub,email,name,role) VALUES('manager','manager@example.com','Responsable Essai','manager')"),
+      DB.prepare("INSERT INTO employees(sub,email,name,role) VALUES('staff','staff@example.com','Employé Essai','staff')"),
+    ]);
+    const managerHeaders={'Cf-Access-Jwt-Assertion':jwt('manager','manager@example.com')};
+    const staffHeaders={'Cf-Access-Jwt-Assertion':jwt('staff','staff@example.com')};
+    const status=await json(await request('/api/rewards/status'));
+    assert.equal(status.rewardsEnabled,true);assert.equal(status.phoneVerificationMode,'unverified');
+    const setup=await json(await request('/api/admin/setup',undefined,managerHeaders));
+    assert.equal(setup.database.schemaReady,true);assert.equal(setup.rewardsConfigured,true);
+    const makeRun=async()=>{
+      const headers={Cookie:`__Host-rewards-owner=${randomBytes(32).toString('base64url')}`};
+      const session=await json(await request('/api/games/start',{width:fixture.width,height:fixture.height,expectedMode:'rewards',turnstileToken:'local-launch-turnstile'},headers));
+      assert.equal(session.phoneVerificationMode,'unverified');assert.equal(Object.hasOwn(session,'phone'),false);
+      const reserved=await DB.prepare('SELECT sms_reserved,sms_day,phone_verification_mode FROM sessions WHERE id=?').bind(session.sessionId).first();
+      assert.equal(reserved.sms_reserved,0);assert.equal(reserved.sms_day,null);assert.equal(reserved.phone_verification_mode,'unverified');
+      await DB.prepare('UPDATE sessions SET seed=?,created_at=? WHERE id=?').bind(fixture.seed,Date.now()-Math.ceil(fixture.ticks/120*1000)-2000,session.sessionId).run();
+      const result=await json(await request('/api/games/finish',{sessionId:session.sessionId,ticks:fixture.ticks,jumps:fixture.jumps,resizes:fixture.resizes,score:999999999},headers));
+      assert.equal(result.score,10526);assert.equal(result.eligible,true);return{headers,session,result};
+    };
+    const run=await makeRun();
+    const claim={sessionId:run.session.sessionId,firstName:'Émilie',lastName:'Tremblay Noël',phone,consentVersion:run.session.policyVersion};
+    assert.equal((await request('/api/rewards/claim',{...claim,phone:'erreur'},run.headers)).status,400);
+    const attempts=await Promise.all(Array.from({length:3},()=>request('/api/rewards/claim',claim,run.headers)));
+    const awarded=await Promise.all(attempts.map(json));assert.ok(awarded.every(r=>r.awarded===true));
+    assert.equal(new Set(awarded.map(r=>r.reward.code)).size,1);const reward=awarded[0].reward;
+    assert.match(reward.code,/^GOAT-[0-9A-F]{32}$/);assert.equal(reward.valueCents,2000);
+    const stored=await DB.prepare('SELECT * FROM rewards WHERE id=?').bind(reward.id).first();
+    assert.equal(stored.phone_verified,0);assert.ok(typeof stored.phone_ciphertext==='string'&&stored.phone_ciphertext.length>20);
+    assert.ok(!stored.phone_ciphertext.includes(phone));assert.notEqual(stored.phone_hash,phone);
+    for(const publicReward of [reward,(await json(await request('/api/rewards/confirmation',undefined,run.headers))).reward]) {
+      for(const field of ['phone','phoneCiphertext','phone_ciphertext','phone_hash','phone_last4','claimedBy','claimedByName','manualReason','budgetOverrideReason'])assert.equal(Object.hasOwn(publicReward,field),false,field);
+    }
+    assert.equal((await DB.prepare('SELECT COUNT(*) n FROM rewards').first()).n,1);
+    assert.equal((await DB.prepare('SELECT COUNT(*) n FROM challenges').first()).n,0);
+    assert.equal((await DB.prepare('SELECT COUNT(*) n FROM sms_daily').first()).n,0);
+    assert.equal((await DB.prepare('SELECT COUNT(*) n FROM notification_sms').first()).n,0);
+    assert.deepEqual(await DB.prepare('SELECT used_cents,reserved_cents FROM budgets').first(),{used_cents:2000,reserved_cents:0});
+    assert.equal((await request('/api/rewards/claim',{...claim,phone:'+15145551235'},run.headers)).status,409);
+    for(const search of ['emilie',phone,'+1 (514) 555-1234',reward.code]) {
+      assert.equal((await request('/api/admin/rewards?search='+encodeURIComponent(search))).status,401);
+      const found=await json(await request('/api/admin/rewards?search='+encodeURIComponent(search),undefined,staffHeaders));
+      assert.equal(found.rewards.length,1);assert.equal(found.rewards[0].code,reward.code);assert.equal(found.rewards[0].phone,phone);assert.equal(found.rewards[0].phoneVerified,false);
+    }
+    const second=await makeRun();
+    const blocked=await request('/api/rewards/claim',{...claim,sessionId:second.session.sessionId},second.headers);
+    assert.equal(blocked.status,409);assert.equal((await blocked.json()).error,'phone_cooldown');
+    assert.equal((await DB.prepare('SELECT COUNT(*) n FROM rewards').first()).n,1);
+    const endpoint='/api/admin/rewards/'+reward.id;
+    const claims=await Promise.all([request(endpoint+'/claim',{},managerHeaders),request(endpoint+'/claim',{},staffHeaders)]);
+    assert.deepEqual(claims.map(r=>r.status).sort(),[200,409]);const winner=claims[0].status===200?managerHeaders:staffHeaders;
+    const used=await json(await request(endpoint+'/use',{discountApplied:true,foodOnlyConfirmed:true,eligibleFoodCents:2000},winner));
+    assert.equal(used.reward.status,'issued');assert.equal(used.reward.phone,phone);
+    const reused=await json(await request(endpoint+'/use',{discountApplied:true,foodOnlyConfirmed:true,eligibleFoodCents:2000},winner));assert.equal(reused.reward.issuedAt,used.reward.issuedAt);
+    assert.equal((await DB.prepare("SELECT COUNT(*) n FROM audit WHERE reward_id=? AND action='issued'").bind(reward.id).first()).n,1);
+    const dashboard=await json(await request('/api/admin/dashboard',undefined,managerHeaders));
+    assert.equal(dashboard.totals.registeredPlayers,1);
+    assert.equal(dashboard.totals.recordedGames,2); // the cooldown scenario also played a recorded run
+    assert.equal(dashboard.totals.rewardsCount,1);
+    assert.equal(dashboard.totals.usedCount,1);
+    assert.equal(dashboard.totals.activeCount,0);
+    assert.equal(dashboard.totals.valueCents,2000);
+    assert.equal(dashboard.totals.appliedValueCents,2000);
+    assert.equal(dashboard.month.valueCents,2000);
+    assert.equal(dashboard.budget.reservedCents,2000); // its pending claim still reserves the offered tier
+    assert.equal(dashboard.budget.remainingCents,6000);
+    assert.equal(dashboard.coverage.gamesComplete,false);
+    assert.deepEqual(dashboard.tiers.map(t=>[t.valueCents,t.count]),[[500,0],[1000,0],[2000,1]]);
+    assert.equal((await request('/api/admin/employees',undefined,staffHeaders)).status,403);
+    const invited=await json(await request('/api/admin/employees',{email:'new-staff@example.com',name:'Nouvel employé',role:'staff'},managerHeaders));
+    assert.equal(invited.employee.sub,'invite:new-staff@example.com');
+    assert.equal((await json(await request('/api/admin/employees',undefined,managerHeaders))).employees.length,3);
+    const invitedHeaders={'Cf-Access-Jwt-Assertion':jwt('new-staff-identity','new-staff@example.com')};
+    assert.equal((await request('/api/admin/dashboard',undefined,invitedHeaders)).status,200);
+    assert.equal((await DB.prepare('SELECT sub FROM employees WHERE email=?').bind('new-staff@example.com').first()).sub,'new-staff-identity');
+    const revoked=await mfLaunch.dispatchFetch(origin+'/api/admin/employees',{
+      method:'PATCH',headers:{...managerHeaders,Origin:origin,'Content-Type':'application/json'},
+      body:JSON.stringify({sub:'new-staff-identity',active:false}),
+    });
+    assert.equal(revoked.status,200);
+    assert.equal((await request('/api/admin/dashboard',undefined,invitedHeaders)).status,403);
+    assert.equal((await DB.prepare("SELECT COUNT(*) n FROM audit WHERE action='employee_created'").first()).n,1);
+    assert.equal((await DB.prepare("SELECT COUNT(*) n FROM audit WHERE action='employee_deactivated'").first()).n,1);
+    assert.deepEqual(forbidden,[]);
+    console.log('PASS: launch without any Twilio secrets replays score, reserves budget, issues one direct code, encrypts phone, searches private clients and enforces cooldown and single use');
+    console.log('PASS: real D1 dashboard counts actual awards and manager invitations bind once, audit atomically and revoke existing staff sessions');
+  } finally {await mfLaunch.dispose();}
 }
 
 (async () => {
@@ -112,7 +215,7 @@ async function migrate(DB) {
   };
   try {
     const DB = await mf.getD1Database('DB');
-    await migrate(DB);
+    await migrateD1(DB);
     await DB.batch([
       DB.prepare("INSERT INTO employees(sub,email,name,role) VALUES('manager','manager@example.com','Responsable Essai','manager')"),
       DB.prepare("INSERT INTO employees(sub,email,name,role) VALUES('staff','staff@example.com','Employé Essai','staff')"),
@@ -179,6 +282,8 @@ async function migrate(DB) {
     assert.equal((await request('/api/rewards/sms/request', profile, run.headers)).status, 503);
     assert.deepEqual(unexpectedOutbound, []);
     redirects.sms = false;
+    // Advance only the fixture’s send gate instead of waiting a real minute.
+    await DB.prepare('UPDATE sessions SET verification_next_send_at=0 WHERE id=?').bind(run.session.sessionId).run();
     const challenge = await json(await request('/api/rewards/sms/request', profile, run.headers));
     const verify = code => request('/api/rewards/sms/verify', { challengeId: challenge.challengeId, phone, code }, run.headers);
     redirects.check = true;
@@ -190,6 +295,7 @@ async function migrate(DB) {
     const awarded = await json(await verify('123456'));
     assert.equal(awarded.awarded, true);
     assert.equal(awarded.reward.valueCents, 2000);
+    assert.equal(awarded.reward.discountApplied, false);
     assert.match(awarded.reward.code, /^GOAT-[0-9A-F]{32}$/);
     assert.equal((await json(await verify('123456'))).reward.code, awarded.reward.code);
     assert.equal(calls.sms, 2);
@@ -207,17 +313,40 @@ async function migrate(DB) {
     assert.equal(before.usedCount, 0);
     const listed = await json(await request('/api/admin/rewards', undefined, employees[0].headers));
     assert.equal(listed.rewards[0].code, awarded.reward.code);
+    assert.equal(listed.rewards[0].discountApplied, false);
     const endpoint = `/api/admin/rewards/${awarded.reward.id}`;
+    assert.equal((await request(endpoint + '/use', { discountApplied: true, foodOnlyConfirmed:true, eligibleFoodCents:2000 }, employees[0].headers)).status, 409);
     const claims = await Promise.all(employees.map(employee => request(endpoint + '/claim', {}, employee.headers)));
     assert.deepEqual(claims.map(response => response.status).sort(), [200, 409]);
     const winner = claims.findIndex(response => response.status === 200);
     const claim = await claims[winner].json();
     assert.equal(claim.reward.claimedBy, employees[winner].sub);
-    assert.equal((await request(endpoint + '/issue', { lightspeedRef: 'LS-LOCAL-ONLY' }, employees[1-winner].headers)).status, 409);
-    assert.equal((await request(endpoint + '/issue', { lightspeedRef: 'LS-LOCAL-ONLY' }, employees[winner].headers)).status, 200);
-    assert.equal((await request(endpoint + '/issue', { lightspeedRef: 'LS-LOCAL-ONLY' }, employees[winner].headers)).status, 200);
-    const counts = await DB.prepare('SELECT action,COUNT(*) count FROM audit WHERE reward_id=? GROUP BY action ORDER BY action').bind(awarded.reward.id).all();
+    assert.equal(claim.reward.discountApplied, false);
+    assert.equal((await request(endpoint + '/issue', { lightspeedRef: 'OLD-CLIENT-LOCAL-ONLY' }, employees[winner].headers)).status, 410);
+    for (const body of [{}, { discountApplied: false }, { discountApplied: 'true' }, { discountApplied: 1 }, { discountApplied: null }]) {
+      assert.equal((await request(endpoint + '/use', body, employees[winner].headers)).status, 400);
+    }
+    assert.equal((await request(endpoint + '/use', { discountApplied: true, foodOnlyConfirmed:true, eligibleFoodCents:2000 }, employees[1-winner].headers)).status, 409);
+    assert.deepEqual(await DB.prepare('SELECT status,discount_applied FROM rewards WHERE id=?').bind(awarded.reward.id).first(), { status: 'claimed', discount_applied: 0 });
+    assert.equal((await DB.prepare("SELECT COUNT(*) count FROM audit WHERE reward_id=? AND action='issued'").bind(awarded.reward.id).first()).count, 0);
+    const applied = await json(await request(endpoint + '/use', { discountApplied: true, foodOnlyConfirmed:true, eligibleFoodCents:2000 }, employees[winner].headers));
+    assert.equal(applied.reward.status, 'issued');
+    assert.equal(applied.reward.discountApplied, true);
+    assert.equal(applied.reward.issuedBy, employees[winner].sub);
+    assert.equal(applied.reward.lightspeedRef, null);
+    const repeated = await json(await request(endpoint + '/use', { discountApplied: true, foodOnlyConfirmed:true, eligibleFoodCents:2000 }, employees[winner].headers));
+    assert.equal(repeated.reward.issuedAt, applied.reward.issuedAt);
+    assert.equal(repeated.reward.discountApplied, true);
+    assert.equal((await request(endpoint + '/use', { discountApplied: true, foodOnlyConfirmed:true, eligibleFoodCents:2000 }, employees[1-winner].headers)).status, 409);
+    const counts = await DB.prepare("SELECT action,COUNT(*) count FROM audit WHERE reward_id=? AND action IN ('claimed','confirmed','issued') GROUP BY action ORDER BY action").bind(awarded.reward.id).all();
     assert.deepEqual(counts.results, [{ action: 'claimed', count: 1 }, { action: 'confirmed', count: 1 }, { action: 'issued', count: 1 }]);
+    const usage = await DB.prepare("SELECT details FROM audit WHERE reward_id=? AND action='issued'").bind(awarded.reward.id).first();
+    assert.deepEqual(JSON.parse(usage.details), { valueCents: 2000, previewTestConsumed:false,discountApplied: true, foodOnlyConfirmed:true,eligibleFoodCents:2000,appliedValueCents:2000,unusedCents:0,reason: null });
+    const stored = await DB.prepare('SELECT discount_applied,lightspeed_ref,issued_by,issued_at,claimed_by,claimed_at FROM rewards WHERE id=?').bind(awarded.reward.id).first();
+    assert.equal(stored.discount_applied, 1);
+    assert.equal(stored.lightspeed_ref, null);
+    assert.equal(stored.issued_by, stored.claimed_by);
+    assert.equal(stored.claimed_at, Date.parse(claim.reward.claimedAt));
     const after = await json(await request('/api/admin/budget', undefined, employees[0].headers));
     assert.equal(after.usedCents, before.usedCents);
     assert.equal(after.reservedCents, before.reservedCents);
@@ -226,9 +355,30 @@ async function migrate(DB) {
     const receipt = await json(await request('/api/rewards/confirmation', undefined, run.headers));
     assert.equal(receipt.reward.code, awarded.reward.code);
     assert.equal(receipt.reward.status, 'issued');
+    assert.equal(receipt.reward.discountApplied, true);
     for (const field of ['claimedBy', 'claimedByName', 'issuedBy', 'issuedByName', 'lightspeedRef', 'cancelReason']) assert.equal(Object.hasOwn(receipt.reward, field), false);
-    console.log('PASS: real D1 code lookup, staff claim race, locked issuance, budget and audit agree');
+    console.log('PASS: real D1 discount lookup, exclusive claim, confirmed manual use, budget and audit agree');
+    // Actual compiled Worker: manager-only manual creation, both justified
+    // exceptions, identical parallel retries, notification and partial food use.
+    const params={phone,valueCents:500};
+    assert.equal((await request('/api/admin/manual-rewards/quote',params,employees[1].headers)).status,403);
+    const quote=await json(await request('/api/admin/manual-rewards/quote',params,employees[0].headers));
+    assert.equal(quote.projectedOverrunCents,500);assert.equal(quote.cooldownRequired,true);
+    const manualBody={...params,firstName:'Camille',lastName:'Manuel',reason:'Geste commercial exceptionnel',requestId:'manual-workerd-integration-1',quote:quote.quote,authorizeBudgetOverrun:true,budgetReason:'Dépassement volontaire approuvé',authorizeCooldown:true,cooldownReason:'Exception des 30 jours approuvée'};
+    const emissions=await Promise.all(Array.from({length:8},()=>request('/api/admin/manual-rewards',manualBody,employees[0].headers)));
+    for(const response of emissions)assert.equal(response.status,200);
+    const emitted=await Promise.all(emissions.map(r=>r.json()));assert.equal(new Set(emitted.map(r=>r.reward.code)).size,1);
+    const manual=emitted[0].reward;assert.equal(manual.source,'manual');assert.equal(manual.score,null);
+    const over=await json(await request('/api/admin/budget',undefined,employees[0].headers));assert.equal(over.budgetCents,10000);assert.equal(over.usedCents,2500);assert.equal(over.reservedCents,8000);assert.equal(over.overrunCents,500);assert.equal(over.remainingCents,0);
+    const initial=await DB.prepare("SELECT COUNT(*) n FROM notification_sms WHERE reward_id=? AND kind='initial'").bind(manual.id).first();assert.equal(initial.n,1);
+    await DB.prepare('UPDATE notification_sms SET created_at=created_at-61000 WHERE reward_id=?').bind(manual.id).run();
+    const resend=await json(await request(`/api/admin/rewards/${manual.id}/notify`,{phone,requestId:'workerd-manual-resend-1'},employees[0].headers));assert.equal(resend.notification.status,'accepted');
+    await json(await request(`/api/admin/rewards/${manual.id}/claim`,{},employees[0].headers));
+    const partial=await json(await request(`/api/admin/rewards/${manual.id}/use`,{discountApplied:true,foodOnlyConfirmed:true,eligibleFoodCents:300},employees[0].headers));assert.equal(partial.reward.appliedValueCents,300);assert.equal(partial.reward.unusedCents,200);
+    assert.equal(calls.notification,3);
+    console.log('PASS: compiled Worker manual manager exceptions, one concurrent code, notification SMS and partial food-only consumption');
     assert.deepEqual(unexpectedOutbound, []);
+    await noSmsLaunchIntegration(script);
   } finally {
     await mf.dispose();
   }

@@ -1,18 +1,22 @@
+**Version actuelle : lancement sans SMS, jeu illimité, contrôles téléphone/navigateur et accès du personnel par courriel. Voir [la procédure actuelle](LANCEMENT-SANS-SMS.md). Les descriptions SMS ci-dessous concernent désormais le mode optionnel futur.**
+
 # Récompenses — mise en place Cloudflare et exploitation
 
 État au 14 novembre 2026 : implémentation et essais locaux sur la branche `develop/noel-recompenses-v1`. La production n'a pas été modifiée. Aucun compte Cloudflare, service SMS ou paiement n'est activé par ce document. Les identifiants Cloudflare nécessaires à la création et à la liaison de D1 ne sont pas disponibles dans cet environnement.
 
-Ce document remplace les propositions historiques de `REWARDS_ARCHITECTURE.md` pour cette branche : la cible est **Cloudflare Pages + Functions + D1**, avec remise manuelle de la carte dans Lightspeed. Les anciens exemples Supabase et les anciens paliers en produits ne décrivent pas cette implémentation.
+**Complément actuel obligatoire : [budget, émissions manuelles, rabais alimentaires, migrations et SMS](AUDIT-BUDGET-CONFIGURABLE.md). Aucun gain réel avant validation auprès de la RACJ.**
+
+Ce document remplace les propositions historiques de `REWARDS_ARCHITECTURE.md` pour cette branche : la cible est **Cloudflare Pages + Functions + D1**, avec application manuelle d’un rabais alimentaire dans Lightspeed. Les anciens exemples Supabase et les anciens paliers en produits ne décrivent pas cette implémentation.
 
 ## Fichiers et hébergement
 
 Correctif de chargement : le Worker est compilé sans couches Node avec `no_nodejs_compat` et `no_nodejs_compat_v2`. Aucun `nodejs_compat` n'est requis par le serveur métier. Voir le [diagnostic, les tests et les réglages Preview](CORRECTIF-WORKER.md). Le fichier d'exemple n'est pas une configuration de production appliquée automatiquement.
 
 - Projet Pages existant : `minijeux`, hôte `minijeux-4gy.pages.dev`.
-- Base de prévisualisation prévue : `boreal-rewards-preview`, liaison D1 **`DB`**.
+- Base de prévisualisation prévue : `defi-boreal-recompenses-preview`, liaison D1 **`DB`**.
 - Exemple de configuration : [`wrangler.preview.example.jsonc`](../wrangler.preview.example.jsonc). L'identifiant D1 y est volontairement un espace réservé.
 - Sources serveur : [`server/api.mjs`](../server/api.mjs), [`server/store.mjs`](../server/store.mjs), [`server/auth.mjs`](../server/auth.mjs), [`server/sms.mjs`](../server/sms.mjs).
-- Schéma : [`migrations/0001_rewards.sql`](../migrations/0001_rewards.sql).
+- Schéma : [les fichiers `migrations/0001_rewards.sql` à `0007_preview_test_consumption.sql`](../migrations/0001_rewards.sql).
 - Entrées Functions : [`functions/_middleware.js`](../functions/_middleware.js) et [`functions/[[path]].js`](../functions/[[path]].js).
 - Publication statique : dossier `v3`. [`scripts/build-pages-worker.mjs`](../scripts/build-pages-worker.mjs) génère `v3/_worker.js` pour servir les API et protéger l'administration sans modifier le paramétrage du projet de production.
 - `v3/_routes.json` fait passer toutes les routes par le Worker, sauf `/assets/*`. Les pages et scripts `/admin/` restent protégés. Aucun export public ne doit contenir des secrets, une base SQLite ou des fichiers `.dev.vars`.
@@ -50,8 +54,8 @@ Changer le secret HMAC change les identifiants dérivés et invalide des challen
 
 Ces commandes décrivent une opération ultérieure sur la prévisualisation. Elles n'ont pas été exécutées sur un compte Cloudflare depuis cet environnement.
 
-1. Créer `boreal-rewards-preview` dans le compte autorisé, puis copier son véritable `database_id` dans la configuration locale. Ne pas réutiliser une base de production.
-2. Appliquer `migrations/0001_rewards.sql` sur cette base, par exemple avec `npx wrangler d1 migrations apply boreal-rewards-preview --remote --config wrangler.preview.local.jsonc`.
+1. Créer `defi-boreal-recompenses-preview` dans le compte autorisé, puis copier son véritable `database_id` dans la configuration locale. Ne pas réutiliser une base de production.
+2. Appliquer les fichiers `migrations/0001_rewards.sql` à `0007_preview_test_consumption.sql` sur cette base, par exemple avec `npx wrangler d1 migrations apply defi-boreal-recompenses-preview --remote --config wrangler.preview.local.jsonc`.
 3. Définir les variables et secrets de prévisualisation, en laissant les trois approbations à `false`.
 4. Configurer Turnstile pour l'hôte réel et une application Access couvrant `/admin/*` et `/api/admin/*` sur cet hôte. Ne pas modifier les politiques ou variables de production pour tester cette branche.
 5. Construire le Worker avec `node scripts/build-pages-worker.mjs`, puis publier uniquement une prévisualisation de `develop/noel-recompenses-v1` selon le circuit du projet existant.
@@ -67,9 +71,9 @@ La table `employees` associe le `sub` Access exact à l'adresse courriel, au nom
 
 La remise suit trois étapes :
 
-1. L'employé vérifie le code, la valeur et l'échéance, puis confirme son utilisation. Une mise à jour conditionnelle fait passer `pending` à `claimed` une seule fois. Cette action verrouille la remise à cet employé ; elle doit réussir sur le serveur avant de créer une carte.
-2. Cet employé crée **manuellement une seule** carte-cadeau dans Lightspeed, du montant confirmé. Le jeu ne dispose d'aucune intégration d'émission Lightspeed.
-3. Le même employé enregistre la référence Lightspeed et confirme la remise réelle. Une autre personne ne peut pas terminer cette remise. Après un problème réseau, consulter l'état existant et Lightspeed avant toute nouvelle émission.
+1. L'employé vérifie le code, la valeur et l'échéance, puis confirme son utilisation. Une mise à jour conditionnelle fait passer `pending` à `claimed` une seule fois. Cette action verrouille la remise à cet employé ; elle doit réussir sur le serveur avant d’appliquer le rabais alimentaire.
+2. Cet employé saisit la portion alimentaire admissible, vérifie le montant calculé, puis applique **manuellement une seule fois** le rabais dans Lightspeed. Aucun rabais direct ou indirect sur les boissons alcooliques. Aucune API Lightspeed.
+3. Le même employé confirme les aliments seulement et le rabais réellement appliqué. Aucune référence Lightspeed n’est exigée. Le code entier est consommé, même pour un rabais partiel ; reliquat perdu sans argent. Après une coupure, vérifier la facture et le registre avant toute reprise.
 
 Un responsable `manager` peut annuler une récompense non remise avec un motif. Une annulation ne rembourse jamais l'enveloppe du mois et n'efface pas la limite de 30 jours. Les transitions, noms des acteurs et horodatages restent dans l'audit. L'export CSV réservé aux employés autorisés contient les états, valeurs, noms et dates de traitement ; les cellules pouvant être interprétées comme des formules sont neutralisées.
 
@@ -79,13 +83,13 @@ Un responsable `manager` peut annuler une récompense non remise avec un motif. 
 |---|---|
 | Paliers | 5 000 points → 5 CAD ; 7 500 → 10 CAD ; 10 000 → 20 CAD. Aucun gain sous 5 000. Un seul gain, jamais le cumul. |
 | Plafond d'une partie | Au départ, réservation atomique du plus grand montant encore disponible parmi 20, 10 et 5 CAD. Le plafond et le mode sont annoncés avant de jouer. Le gain vaut `min(palier du score, plafond annoncé)`. Un plafond de 10 CAD reste 10 CAD même avec 10 000 points. |
-| Enveloppe interne | 100 CAD par **mois civil dans `America/Toronto`**, toutes les récompenses confirmées et réservations actives confondues. Pas de report entre mois, ni remboursement après utilisation ou annulation. Ce montant interne n'est pas publié dans le règlement public ni dans l'API publique. |
+| Enveloppe interne | Plafond normal configurable par **mois civil dans `America/Toronto`**, initialement 100 CAD. Attributions et réservations normales respectent ce plafond ; les dépassements manuels sont autorisés et audités séparément, sans relever le plafond. Pas de report entre mois, ni remboursement après utilisation ou annulation. Ce montant interne n'est pas publié dans le règlement public ni dans l'API publique. |
 | Réservation | 30 minutes à partir du départ serveur, pauses comprises. Les parties perdues et les réservations échues libèrent seulement les montants encore réservés. Une attribution confirmée consomme définitivement son montant. |
 | Durée de jeu | Au plus 15 minutes de simulation effective, 120 pas par seconde. Les pauses ne simulent pas de temps, mais consomment la validité de réservation de 30 minutes. |
 | Fin de mois | Aucun nouveau départ récompensé dans les 31 minutes précédant minuit le premier du mois suivant, heure de Toronto. Cela évite de transporter une réservation rémunérée d'un mois à l'autre. |
 | Confirmation SMS | Seulement après un résultat serveur admissible. Prénom, nom, téléphone international et acceptation des conditions sont demandés à ce moment. Le délai est au plus 10 minutes après la fin, **sans jamais dépasser la réservation de 30 minutes**. |
 | Limite de gain | Un gain confirmé par numéro vérifié pendant les 30 × 24 heures précédentes. Le règlement impose une récompense par personne : le téléphone est un contrôle technique, pas une preuve d'identité. Plusieurs personnes peuvent partager un numéro ; une personne peut en posséder plusieurs. Interdire le contournement ne le rend pas techniquement impossible. |
-| Code | Code aléatoire généré côté serveur seulement après approbation SMS et attribution atomique. Usage unique, à présenter dans les 30 × 24 heures après attribution. Ce délai concerne la réclamation du prix, pas la validité de la carte-cadeau Lightspeed. |
+| Code | Code aléatoire généré côté serveur après approbation SMS et attribution atomique pour le jeu, ou décision manuelle d’un gestionnaire authentifié et auditée. Usage unique, à présenter dans les 30 × 24 heures après attribution. Il donne droit à un rabais alimentaire, sans émission de carte-cadeau. |
 | Modes | `rewards` : mécanique normale et plafond réservé ; `extreme` : difficulté accrue annoncée, aucun gain ; `pending` : entraînement sans gain quand la configuration ou le service n'est pas prêt. Le mode d'une session est figé. |
 
 ## Protection, données et limites connues
@@ -106,7 +110,7 @@ La politique de conservation, les suppressions, l'accès aux données et le trai
 
 ## Validation avant activation
 
-Conserver `REWARDS_ENABLED=false`, `SMS_APPROVED=false` et `TERMS_APPROVED=false` tant que les points suivants ne sont pas réglés : identité et coordonnées de l'organisateur, dates, âge et territoire admissibles, conditions de carte-cadeau, procédure de contestation, contact de confidentialité, durées de conservation, coût et limites SMS, contrôle des abus et disponibilité de la confirmation d'un gagnant déjà en partie. Le texte public [`v3/reglement.html`](../v3/reglement.html) est une version à finaliser ; ce document ne constitue pas une validation juridique.
+Conserver `REWARDS_ENABLED=false`, `SMS_APPROVED=false` et `TERMS_APPROVED=false` tant que les points suivants ne sont pas réglés : identité et coordonnées de l'organisateur, dates, âge et territoire admissibles, conditions du bon alimentaire, procédure de contestation, contact de confidentialité, durées de conservation, coût et limites SMS, contrôle des abus et disponibilité de la confirmation d'un gagnant déjà en partie. Le texte public [`v3/reglement.html`](../v3/reglement.html) est une version à finaliser ; ce document ne constitue pas une validation juridique.
 
 Essais locaux, sous Node 24 :
 
@@ -127,13 +131,13 @@ Depuis la racine du dépôt, sur un poste connecté au compte Cloudflare autoris
 ```sh
 npm ci --ignore-scripts
 npx wrangler login
-npx wrangler d1 create boreal-rewards-preview
+npx wrangler d1 create defi-boreal-recompenses-preview
 cp wrangler.preview.example.jsonc wrangler.preview.local.jsonc
 # Renseigner le database_id réel et APP_ORIGIN dans ce fichier local ignoré par Git.
 npx wrangler d1 migrations apply DB --remote --config wrangler.preview.local.jsonc
 ```
 
-Dans **Workers & Pages → minijeux → Settings → Bindings → Preview**, ajouter D1, nom de liaison `DB`, base `boreal-rewards-preview`. Dans les variables/secrets **Preview**, renseigner exactement le tableau ci-dessus. Ne pas sélectionner Production. Un redéploiement de la prévisualisation est nécessaire après changement des liaisons ou variables ; ne pas lancer un déploiement de production. Le Worker déjà généré dans `v3` permet de conserver le paramétrage de publication statique existant. Après toute modification de `server/`, `functions/` ou du moteur partagé, exécuter `npm run build:pages` et versionner `v3/_worker.js`.
+Dans **Workers & Pages → minijeux → Settings → Bindings → Preview**, ajouter D1, nom de liaison `DB`, base `defi-boreal-recompenses-preview`. Dans les variables/secrets **Preview**, renseigner exactement le tableau ci-dessus. Ne pas sélectionner Production. Un redéploiement de la prévisualisation est nécessaire après changement des liaisons ou variables ; ne pas lancer un déploiement de production. Le Worker déjà généré dans `v3` permet de conserver le paramétrage de publication statique existant. Après toute modification de `server/`, `functions/` ou du moteur partagé, exécuter `npm run build:pages` et versionner `v3/_worker.js`.
 
 Créer une application **Cloudflare Zero Trust → Access → Applications → Self-hosted** couvrant les chemins `/admin*` et `/api/admin/*` de l’alias de prévisualisation retenu, avec la même audience pour les destinations. Autoriser seulement les comptes nominatifs du personnel via le fournisseur d’identité choisi et imposer son authentification multifacteur. Configurer `ACCESS_TEAM_DOMAIN` et l’Application Audience (`ACCESS_AUD`) côté Preview. Protéger également les autres alias publiés ; le contrôle JWT dans le Worker refuse de toute façon les accès anonymes et les en-têtes courriel falsifiés.
 
@@ -162,4 +166,4 @@ Turnstile : autoriser le nom d’hôte exact de la prévisualisation, configurer
 
 ## Références pour la validation au Québec
 
-Faire valider les modalités promotionnelles et l’admissibilité applicables, la distinction entre délai de réclamation du prix et conditions de carte-cadeau, le consentement et la politique de confidentialité, la conservation et le traitement par les fournisseurs. Sources officielles de départ : [OPC — cartes-cadeaux](https://www.opc.gouv.qc.ca/consommateur/bien-service/carte-prepayee/carte-cadeau/), [Commission d’accès à l’information](https://www.cai.gouv.qc.ca/) et [Régie des alcools, des courses et des jeux](https://www.racj.gouv.qc.ca/). Ces liens ne constituent pas une confirmation que la promotion est juridiquement prête.
+Faire valider les modalités promotionnelles et l’admissibilité applicables, la distinction entre délai de réclamation du prix et conditions du bon alimentaire, le consentement et la politique de confidentialité, la conservation et le traitement par les fournisseurs. Sources officielles de départ : [Office de la protection du consommateur](https://www.opc.gouv.qc.ca/), [Commission d’accès à l’information](https://www.cai.gouv.qc.ca/) et [Régie des alcools, des courses et des jeux](https://www.racj.gouv.qc.ca/). Ces liens ne constituent pas une confirmation que la promotion est juridiquement prête.

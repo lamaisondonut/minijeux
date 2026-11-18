@@ -35,7 +35,7 @@ worker.stdout.on('data',chunk=>{output+=chunk});worker.stderr.on('data',chunk=>{
   let response=await fetch(origin+'/api/rewards/status');
   assert.match(response.headers.get('cache-control'),/no-store/);
   const status=await response.json();assert.equal(status.mode,'pending');assert.equal(status.rewardsEnabled,false);
-  assert.ok(!/budget|remainingCents|usedCents|phone|employee/i.test(JSON.stringify(status)));
+  const {phoneVerificationMode,...publicStatus}=status;assert.ok(['unverified','sms',null].includes(phoneVerificationMode));assert.ok(!/budget|remainingCents|usedCents|phone|employee/i.test(JSON.stringify(publicStatus)));
   for(const pathname of ['/admin','/admin/','/admin/index.html','/admin%2Findex.html','/api/admin/me','/api/admin/rewards','/api/admin/export','/api/admin/setup']){
    response=await fetch(origin+pathname,{redirect:'manual',headers:{'Cf-Access-Authenticated-User-Email':'forged@example.test'}});
    assert.ok([401,403,503].includes(response.status),`${pathname}: ${response.status}`);
@@ -47,7 +47,7 @@ worker.stdout.on('data',chunk=>{output+=chunk});worker.stderr.on('data',chunk=>{
   }
   response=await fetch(origin+'/api/games/start',{method:'POST',headers:{origin,'content-type':'application/json'},body:JSON.stringify({width:390,height:844,expectedMode:'rewards'})});
   assert.equal(response.status,503);
-  response=await fetch(origin+'/api/rewards/sms/request',{method:'POST',headers:{origin,'content-type':'application/json'},body:'{}'});assert.equal(response.status,503);
+  response=await fetch(origin+'/api/rewards/sms/request',{method:'POST',headers:{origin,'content-type':'application/json'},body:'{}'});assert.equal(response.status,409);assert.equal((await response.json()).error,'sms_disabled');
   browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium',headless:true,args:['--no-sandbox']});
   const page=await browser.newPage({viewport:{width:390,height:844}}),errors=[];
   page.on('pageerror',error=>errors.push(error.message));

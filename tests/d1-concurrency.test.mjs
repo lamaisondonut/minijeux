@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { isMainThread, parentPort, Worker, workerData } from 'node:worker_threads';
 import test from 'node:test';
 import { openReviewDatabase } from './helpers/review-d1.mjs';
+import { migrateSqlite } from './helpers/migrations.cjs';
 import { award, cleanup, reserveSmsQuota, reserveSmsSend, startSession } from '../server/store.mjs';
 import { handleRequest } from '../server/api.mjs';
 import { POLICY_VERSION, secureId, torontoDay } from '../server/common.mjs';
@@ -12,7 +13,7 @@ import { privateHmac, signChallenge } from '../server/sms.mjs';
 
 const ORIGIN = 'https://rewards-concurrency.example';
 const baseEnv = {
-  APP_ORIGIN: ORIGIN,
+  APP_ORIGIN: ORIGIN, PHONE_VERIFICATION_MODE:'sms',
   REWARDS_ENABLED: 'true', SMS_APPROVED: 'true', TERMS_APPROVED: 'true',
   SMS_PROVIDER: 'twilio', SMS_DAILY_LIMIT: '8',
   REWARDS_HMAC_SECRET: 'independent-concurrency-test-hmac-secret-32-bytes',
@@ -66,7 +67,7 @@ if (!isMainThread) {
     const file = join(directory, 'rewards.sqlite');
     const database = openReviewDatabase(file);
     database.sqlite.exec('PRAGMA journal_mode=WAL;');
-    database.sqlite.exec(readFileSync(new URL('../migrations/0001_rewards.sql', import.meta.url), 'utf8'));
+    migrateSqlite(database.sqlite);
     return { ...database, file, close() { database.sqlite.close(); rmSync(directory, { recursive: true, force: true }); } };
   }
 
@@ -253,7 +254,7 @@ if (!isMainThread) {
     } finally { f.close(); }
   });
 
-  test('24 authenticated claim requests use the code once and lock issuance to that employee', async () => {
+  test('24 authenticated staff race to claim a discount; only its claimant can confirm one manual use', async () => {
     const f = fixture();
     try {
       const now = Date.now();
@@ -280,17 +281,23 @@ if (!isMainThread) {
       const originalFetch = globalThis.fetch;
       globalThis.fetch = async () => Response.json({ keys: [jwk] });
       try {
-        const issue = async index => handleRequest(request(`/api/admin/rewards/${reward.id}/issue`, { lightspeedRef: 'LS-UNIQUE' },
+        const use = async (index, body = { discountApplied: true, foodOnlyConfirmed:true, eligibleFoodCents:2000 }) => handleRequest(request(`/api/admin/rewards/${reward.id}/use`, body,
           { 'Cf-Access-Jwt-Assertion': tokens[index] }), { ...baseEnv, DB: f.DB });
-        assert.equal((await issue((winner + 1) % 24)).status, 409);
-        assert.equal((await issue(winner)).status, 200);
-        assert.equal((await issue(winner)).status, 200);
+        assert.equal((await use(winner, { discountApplied: false })).status, 400);
+        assert.equal((await use((winner + 1) % 24)).status, 409);
+        assert.equal((await use(winner)).status, 200);
+        assert.equal((await use(winner)).status, 200);
       } finally { globalThis.fetch = originalFetch; }
       assert.equal(f.sqlite.prepare("SELECT count(*) AS n FROM audit WHERE action='issued'").get().n, 1);
       const issued = f.sqlite.prepare('SELECT * FROM rewards').get();
       assert.equal(issued.issued_by, claimed.claimed_by);
       assert.equal(issued.claimed_by_name, `Employee ${winner}`);
       assert.equal(issued.issued_by_name, `Employee ${winner}`);
+      assert.equal(issued.discount_applied, 1);
+      assert.equal(issued.lightspeed_ref, null);
+      assert.deepEqual(JSON.parse(f.sqlite.prepare("SELECT details FROM audit WHERE reward_id=? AND action='issued'").get(reward.id).details), {
+        valueCents: reward.value_cents, previewTestConsumed:false,discountApplied: true, foodOnlyConfirmed:true,eligibleFoodCents:2000,appliedValueCents:2000,unusedCents:0,reason: null,
+      });
     } finally { f.close(); }
   });
 
@@ -302,8 +309,10 @@ if (!isMainThread) {
       const phoneHash = await privateHmac(baseEnv, 'phone', phone);
       const run = await eligible(f, now, { ownerHash, phoneHash });
       const challengeId = secureId(), providerSid = `VE${'3'.repeat(32)}`;
-      f.sqlite.prepare("INSERT INTO challenges(id,owner_hash,session_id,phone_hash,created_at,expires_at,state,provider_sid,consent_version,first_name,last_name) VALUES(?,?,?,?,?,?,'pending',?,?, 'Test','Player')")
+      f.sqlite.prepare("INSERT INTO challenges(id,owner_hash,session_id,phone_hash,created_at,expires_at,state,provider_sid,consent_version,first_name,last_name,revision) VALUES(?,?,?,?,?,?,'pending',?,?, 'Test','Player',1)")
         .run(challengeId, ownerHash, run.sessionId, phoneHash, now, now + 600000, providerSid, POLICY_VERSION);
+      f.sqlite.prepare('UPDATE sessions SET active_challenge_id=?,verification_revision=1,verification_send_count=1 WHERE id=?').run(challengeId,run.sessionId);
+      f.sqlite.prepare('UPDATE challenges SET state=state WHERE id=?').run(challengeId);
       const token = await signChallenge(baseEnv, { challengeId, ownerHash, sessionId: run.sessionId, phoneHash, expiresAt: Math.floor((now + 600000) / 1000) });
       const args = { path: '/api/rewards/sms/verify', body: { challengeId: token, phone, code: '000000' },
         headers: { Cookie: `__Host-rewards-owner=${rawOwner}`, 'CF-Connecting-IP': '192.0.2.10' } };
@@ -333,6 +342,48 @@ if (!isMainThread) {
     } finally { f.close(); }
   });
 
+  async function unverifiedEligible(f,now) {
+    const rawOwner=secureId(32),ownerHash=await privateHmac(baseEnv,'owner',rawOwner);
+    const args=startArgs(now,{ownerHash,phoneVerificationMode:'unverified',quotaDay:null,quotaLimit:0});
+    const row=await startSession(f.DB,args);
+    f.sqlite.prepare("UPDATE sessions SET state='eligible',score=10000,claim_deadline=? WHERE id=?").run(now+600000,row.id);
+    return {sessionId:row.id,headers:{Cookie:`__Host-rewards-owner=${rawOwner}`,'CF-Connecting-IP':'192.0.2.20'}};
+  }
+  const launchEnv={PHONE_VERIFICATION_MODE:'unverified',SMS_APPROVED:'false',SMS_DAILY_LIMIT:'0',NOTIFICATION_SMS_ENABLED:'false',TWILIO_ACCOUNT_SID:undefined,TWILIO_VERIFY_SERVICE_SID:undefined,TWILIO_AUTH_TOKEN:undefined};
+  const launchProfile=(run,overrides={})=>({sessionId:run.sessionId,phone:'+15145551234',firstName:'Camille',lastName:'Concurrent',consentVersion:POLICY_VERSION,...overrides});
+
+  test('24 direct no-SMS claim retries allocate one code and one budget charge on independent connections',async()=>{
+    const f=fixture();try{
+      const now=Date.now(),run=await unverifiedEligible(f,now),body=launchProfile(run);
+      const results=await race(f.file,Array.from({length:24},()=>({operation:'api',env:launchEnv,args:{path:'/api/rewards/claim',body,headers:run.headers}})));
+      assert.ok(results.every(r=>r.ok&&[200,409,429].includes(r.value.status)),JSON.stringify(results));
+      const wins=results.filter(r=>r.value.status===200&&r.value.body.awarded===true);assert.ok(wins.length>=1);assert.equal(new Set(wins.map(r=>r.value.body.reward.code)).size,1);
+      assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM rewards').get().n,1);assert.equal(f.sqlite.prepare("SELECT COUNT(*) n FROM audit WHERE action='confirmed'").get().n,1);
+      assert.deepEqual({...f.sqlite.prepare('SELECT used_cents,reserved_cents FROM budgets').get()},{used_cents:2000,reserved_cents:0});
+      assert.ok(results.every(r=>r.value.providerCalls===0));assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM challenges').get().n,0);assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM sms_daily').get().n,0);
+    }finally{f.close();}
+  });
+
+  test('two no-SMS winning sessions competing for one phone enforce the global 30-day limit atomically',async()=>{
+    const f=fixture();try{
+      const now=Date.now(),runs=[await unverifiedEligible(f,now),await unverifiedEligible(f,now)];
+      const results=await race(f.file,runs.map(run=>({operation:'api',env:launchEnv,args:{path:'/api/rewards/claim',body:launchProfile(run),headers:run.headers}})));
+      assert.ok(results.every(r=>r.ok));assert.deepEqual(results.map(r=>r.value.status).sort(),[200,409]);
+      assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM rewards').get().n,1);assert.deepEqual({...f.sqlite.prepare('SELECT used_cents,reserved_cents FROM budgets').get()},{used_cents:2000,reserved_cents:2000});assert.ok(results.every(r=>r.value.providerCalls===0));
+    }finally{f.close();}
+  });
+
+  test('different unverified phone submissions racing for one game preserve one beneficiary and one code',async()=>{
+    const f=fixture();try{
+      const now=Date.now(),run=await unverifiedEligible(f,now),phones=['+15145551234','+15145551235'];
+      const results=await race(f.file,phones.map((phone,index)=>({operation:'api',env:launchEnv,args:{path:'/api/rewards/claim',body:launchProfile(run,{phone,firstName:'Phone '+index}),headers:run.headers}})));
+      assert.ok(results.every(r=>r.ok));assert.deepEqual(results.map(r=>r.value.status).sort(),[200,409]);const winner=results.findIndex(r=>r.value.status===200);
+      const stored=f.sqlite.prepare('SELECT * FROM rewards').get();assert.equal(stored.first_name,'Phone '+winner);assert.equal(stored.phone_hash,await privateHmac(baseEnv,'phone',phones[winner]));assert.equal(stored.phone_verified,0);
+      assert.ok(!stored.phone_ciphertext.includes(phones[winner]));assert.deepEqual({...f.sqlite.prepare('SELECT used_cents,reserved_cents FROM budgets').get()},{used_cents:2000,reserved_cents:0});
+      assert.ok(results.every(r=>r.value.providerCalls===0));
+    }finally{f.close();}
+  });
+
   test('different approved phones racing for one session bind one phone and issue one code', async () => {
     const f = fixture();
     try {
@@ -348,8 +399,9 @@ if (!isMainThread) {
         const phoneHash = await privateHmac(baseEnv, 'phone', phone);
         hashes.push(phoneHash);
         const challengeId = secureId(), providerSid = `VE${String(index + 3).repeat(32)}`;
-        f.sqlite.prepare("INSERT INTO challenges(id,owner_hash,session_id,phone_hash,created_at,expires_at,state,provider_sid,consent_version,first_name,last_name) VALUES(?,?,?,?,?,?,'pending',?,?,?, 'Player')")
-          .run(challengeId, ownerHash, run.sessionId, phoneHash, now, now + 600000, providerSid, POLICY_VERSION, `Phone ${index}`);
+        f.sqlite.prepare("INSERT INTO challenges(id,owner_hash,session_id,phone_hash,created_at,expires_at,state,provider_sid,consent_version,first_name,last_name,revision) VALUES(?,?,?,?,?,?,'pending',?,?,?, 'Player',?)")
+          .run(challengeId, ownerHash, run.sessionId, phoneHash, now, now + 600000, providerSid, POLICY_VERSION, `Phone ${index}`,index+1);
+        f.sqlite.prepare('UPDATE sessions SET active_challenge_id=?,verification_revision=verification_revision+1,verification_send_count=verification_send_count+1 WHERE id=?').run(challengeId,run.sessionId);
         const token = await signChallenge(baseEnv, { challengeId, ownerHash, sessionId: run.sessionId, phoneHash,
           expiresAt: Math.floor((now + 600000) / 1000) });
         operations.push({ operation: 'api', args: { path: '/api/rewards/sms/verify',
@@ -370,4 +422,23 @@ if (!isMainThread) {
       assert.deepEqual({ ...f.sqlite.prepare('SELECT used_cents,reserved_cents FROM budgets').get() }, { used_cents: 2000, reserved_cents: 0 });
     } finally { f.close(); }
   });
+  test('unverified launch HTTP claims are atomic across real connections, including two phones on the same device',async()=>{
+    const f=fixture();
+    try{
+      const now=Date.now(),raw=secureId(32),ownerHash=await privateHmac(baseEnv,'owner',raw);
+      const mode={PHONE_VERIFICATION_MODE:'unverified',SMS_APPROVED:'false',SMS_DAILY_LIMIT:'0',NOTIFICATION_SMS_ENABLED:'false',TWILIO_ACCOUNT_SID:'',TWILIO_AUTH_TOKEN:'',TWILIO_VERIFY_SERVICE_SID:''};
+      const run=await eligible(f,now,{ownerHash,phoneVerificationMode:'unverified'});f.sqlite.prepare('UPDATE sessions SET bound_phone_hash=NULL WHERE id=?').run(run.sessionId);
+      const args={path:'/api/rewards/claim',body:{sessionId:run.sessionId,phone:'+15145551234',firstName:'Camille',lastName:'Essai',consentVersion:POLICY_VERSION},headers:{Cookie:'__Host-rewards-owner='+raw}};
+      const results=await race(f.file,Array.from({length:16},()=>({operation:'api',args,env:mode})));
+      assert.ok(results.every(r=>r.ok&&r.value.status===200),JSON.stringify(results.filter(r=>!r.ok||r.value.status!==200)));
+      assert.equal(new Set(results.map(r=>r.value.body.reward.code)).size,1);assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM rewards').get().n,1);
+      const raw2=secureId(32),device=await privateHmac(baseEnv,'owner',raw2),ids=[secureId(),secureId()];
+      for(const id of ids)f.sqlite.prepare("INSERT INTO sessions(id,owner_hash,seed,width,height,mode,engine_version,month,cap_cents,created_at,expires_at,state,reservation_active,score,claim_deadline,phone_verification_mode) VALUES(?,?,1,390,844,'rewards','test','2026-11',2000,?,?,'eligible',1,10000,?,'unverified')").run(id,device,now,now+600000,now+600000);
+      const two=await race(f.file,ids.map((id,index)=>({operation:'api',env:mode,args:{path:'/api/rewards/claim',body:{sessionId:id,phone:index?'+15145551236':'+15145551235',firstName:'Autre',lastName:'Client',consentVersion:POLICY_VERSION},headers:{Cookie:'__Host-rewards-owner='+raw2}}})));
+      assert.equal(two.filter(r=>r.ok&&r.value.status===200).length,1,JSON.stringify(two));assert.equal(two.filter(r=>r.ok&&r.value.status===409).length,1);
+      assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM rewards').get().n,2);assert.equal(f.sqlite.prepare('SELECT used_cents FROM budgets').get().used_cents,4000);
+      assert.ok(results.every(r=>r.value.providerCalls===0)&&two.every(r=>r.value.providerCalls===0));
+    }finally{f.close();}
+  });
+
 }

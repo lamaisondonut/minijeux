@@ -8,6 +8,8 @@
   <title>Récompenses · Espace employés</title>
   <link rel="stylesheet" href="/admin/admin.css">
   <script src="/admin/admin.js" defer></script>
+  <script src="/admin/manual.js" defer></script>
+  <script src="/admin/management.js" defer></script>
 </head>
 <body>
   <header class="site-header">
@@ -26,9 +28,9 @@
     <section id="access-panel" class="access-panel" aria-live="polite">
       <span class="eyebrow">Espace employés</span>
       <h1 id="access-title">Vérification de votre accès…</h1>
-      <p id="access-message">Veuillez patienter pendant la connexion à votre compte individuel.</p>
+      <p id="access-message">Une connexion au début du service suffit pour vérifier plusieurs codes. Aucun compte Cloudflare n’est nécessaire.</p>
       <p id="access-identity" hidden></p>
-      <a id="access-login" class="button primary" href="/admin/" hidden>Se connecter avec mon compte</a>
+      <a id="access-login" class="button primary" href="/admin/" hidden>Se connecter avec mon courriel</a>
       <button id="access-retry" class="button secondary" type="button" hidden>Réessayer</button>
     </section>
 
@@ -37,22 +39,26 @@
         <div>
           <span class="eyebrow">Espace employés · Campagne de Noël</span>
           <h1>Récompenses clients</h1>
-          <p>Recherchez le code du client pour remettre sa carte-cadeau.</p>
+          <p>Recherchez un client par nom, téléphone ou code pour consulter ses récompenses.</p><p class="inline-error"><strong>Rabais applicable uniquement aux aliments. Ne pas réduire le prix des boissons alcooliques.</strong> Facture mixte : portion alimentaire seulement. Montant limité aux aliments admissibles ; reliquat perdu, sans échange contre de l’argent.</p>
         </div>
         <a class="procedure-link" href="#procedure">Consulter la procédure <span aria-hidden="true">↓</span></a>
       </section>
 
-      <section class="budget-panel" aria-label="Budget interne du mois">
-        <div class="budget-heading"><h2>Budget du mois</h2><span id="budget-month">Chargement…</span><span class="internal-label">Usage interne</span></div>
-        <div id="budget-values" class="budget-grid" aria-busy="true">
-          <div><span class="metric-label">Budget mensuel</span><strong id="budget-total">—</strong></div>
-          <div><span class="metric-label">Montant attribué</span><strong id="budget-used">—</strong></div>
-          <div><span class="metric-label">Budget restant</span><strong id="budget-remaining">—</strong></div>
-          <div><span class="metric-label">Codes à réclamer</span><strong id="budget-pending">—</strong></div>
-          <div><span class="metric-label">Codes utilisés — total</span><strong id="budget-used-count">—</strong></div>
+      <section id="overview-panel" class="overview-panel surface" aria-labelledby="overview-title">
+        <div class="section-heading"><div><span class="eyebrow">Données du registre</span><h2 id="overview-title">Vue d’ensemble</h2></div><button id="overview-refresh" type="button" class="button secondary">Actualiser les chiffres</button></div>
+        <div id="overview-values" class="overview-grid" aria-busy="true">
+          <div><span>Joueurs enregistrés</span><strong id="overview-players">—</strong></div>
+          <div><span>Parties enregistrées</span><strong id="overview-games">—</strong></div>
+          <div><span>Récompenses attribuées</span><strong id="overview-rewards">—</strong></div>
+          <div><span>Récompenses utilisées</span><strong id="overview-used">—</strong></div>
+          <div><span>Récompenses actives</span><strong id="overview-active">—</strong></div>
+          <div><span>Récompenses expirées</span><strong id="overview-expired">—</strong></div>
+          <div><span>Valeur totale attribuée</span><strong id="overview-value">—</strong></div>
+          <div><span>Budget disponible ce mois</span><strong id="overview-available">—</strong></div>
         </div>
-        <p class="budget-note"><span id="budget-reserved" hidden></span>Les nombres de codes couvrent tous les mois.</p>
-        <p id="budget-error" class="inline-error" hidden></p>
+        <div id="overview-tiers" class="overview-tiers" aria-label="Répartition des récompenses attribuées"></div>
+        <p id="overview-coverage" class="overview-note">Chargement des données conservées…</p>
+        <p id="overview-error" class="inline-error overview-note" role="status" hidden></p>
       </section>
 
       <div id="notification" class="notification" role="status" aria-live="polite" hidden></div>
@@ -61,8 +67,8 @@
         <div class="rewards-panel surface">
           <div class="section-heading"><div><span class="eyebrow">Registre</span><h2 id="registry-title">Derniers gagnants</h2></div><button id="export-button" class="button text-button" type="button">Exporter CSV <span aria-hidden="true">↓</span></button></div>
           <form id="search-form" class="search-form" role="search">
-            <div class="field search-field"><label for="code-search">Rechercher un code</label><div class="search-controls"><input id="code-search" type="search" name="code" maxlength="80" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="Saisir le code du client"><button class="button primary" type="submit">Rechercher</button></div></div>
-            <div class="field status-field"><label for="status-filter">Statut</label><select id="status-filter" name="status"><option value="">Tous les statuts</option><option value="pending">À utiliser</option><option value="claimed">En cours de remise</option><option value="issued">Carte remise</option><option value="expired">Code expiré</option><option value="cancelled">Annulé</option></select></div>
+            <div class="field search-field"><label for="code-search">Nom, téléphone ou code</label><div class="search-controls"><input id="code-search" type="search" name="search" maxlength="160" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Nom, téléphone ou code"><button class="button primary" type="submit">Rechercher</button></div></div>
+            <div class="field status-field"><label for="status-filter">Statut</label><select id="status-filter" name="status"><option value="">Tous les statuts</option><option value="pending">À utiliser</option><option value="claimed">Pris en charge</option><option value="issued">Déjà utilisé</option><option value="expired">Code expiré</option><option value="cancelled">Annulé</option></select></div>
           </form>
           <div class="list-meta"><p id="result-count" role="status">Chargement des récompenses…</p><button id="refresh-button" class="refresh-button" type="button">Actualiser <span aria-hidden="true">↻</span></button></div>
           <div class="list-heading" aria-hidden="true"><span>Client et code</span><span>Valeur</span><span>Statut</span></div>
@@ -72,28 +78,102 @@
         </div>
 
         <aside id="detail-panel" class="detail-panel surface" aria-label="Détail de la récompense">
-          <div id="detail-empty" class="detail-empty"><span class="detail-icon" aria-hidden="true">↖</span><span class="eyebrow">Vérification d’un code</span><h2>Entrez le code du client</h2><p>Sa fiche s’affichera après la recherche. Vous pouvez aussi choisir un gagnant dans la liste.</p></div>
+          <div id="detail-empty" class="detail-empty"><span class="detail-icon" aria-hidden="true">↖</span><span class="eyebrow">Vérification d’un code</span><h2>Recherchez un client</h2><p>Ses récompenses s’afficheront après la recherche. Choisissez une ligne pour ouvrir sa fiche.</p></div>
           <div id="detail-content" hidden>
             <div class="section-heading detail-heading"><span class="eyebrow">Fiche récompense</span><button id="close-detail" class="close-button" type="button" aria-label="Fermer la fiche">×</button></div>
             <div class="detail-title"><span id="detail-status" class="status-badge"></span><h2 id="detail-name"></h2><p id="detail-code" class="reward-code"></p><strong id="detail-value" class="reward-value"></strong></div>
             <p id="detail-validation" class="code-validation" role="status" hidden></p>
             <dl id="detail-facts" class="detail-facts"></dl>
             <div id="detail-action"></div>
+            <section id="eligibility-section" class="audit-section" aria-label="Admissibilité et doublons"></section>
             <section class="audit-section" aria-label="Historique"><h3>Historique</h3><p id="audit-state" class="muted">Chargement de l’historique…</p><ol id="audit-list" class="audit-list"></ol></section>
           </div>
         </aside>
       </section>
 
+      <section class="budget-panel" aria-label="Budget interne du mois">
+        <div class="budget-heading"><h2>Budget du mois</h2><span id="budget-month">Chargement…</span><span class="internal-label">Usage interne</span></div>
+        <div id="budget-values" class="budget-grid" aria-busy="true">
+          <div><span class="metric-label">Budget mensuel</span><strong id="budget-total">—</strong></div>
+          <div><span class="metric-label">Montant attribué</span><strong id="budget-used">—</strong></div>
+          <div><span class="metric-label">Budget restant</span><strong id="budget-remaining">—</strong></div>
+          <div><span class="metric-label">Codes à réclamer</span><strong id="budget-pending">—</strong></div>
+          <div><span class="metric-label">Codes pris en charge / utilisés</span><strong id="budget-used-count">—</strong></div>
+        </div>
+        <p id="budget-overrun" class="budget-note" hidden></p>
+        <p class="budget-note"><span id="budget-reserved" hidden></span>Les nombres de codes couvrent tous les mois.</p>
+        <p class="budget-note">Montants des bons attribués ce mois-ci, selon leur statut actuel.</p>
+        <div id="budget-activity" class="budget-activity" aria-label="Récompenses attribuées ce mois">
+          <div><span>Valeur des bons utilisés</span><strong id="month-used-value">—</strong></div>
+          <div><span>Rabais réellement appliqués</span><strong id="month-applied-value">—</strong></div>
+          <div><span>Valeur des bons expirés</span><strong id="month-expired-value">—</strong></div>
+        </div>
+        <p id="month-reward-tiers" class="budget-note"></p>
+        <p class="budget-note">Les bons déjà attribués restent engagés dans le budget, même après utilisation ou expiration.</p>
+        <p id="budget-error" class="inline-error" hidden></p>
+        <div id="budget-editor" class="budget-editor" hidden>
+          <h3>Modifier le budget</h3>
+          <p id="budget-future" class="budget-note"></p>
+          <p id="budget-commitments" class="budget-note"></p>
+          <p id="budget-updated" class="budget-note" hidden></p>
+          <form id="budget-edit-form">
+            <fieldset id="budget-fields" disabled>
+              <div class="field budget-amount-field"><label for="budget-amount">Nouveau budget mensuel (CAD)</label><input id="budget-amount" name="budgetAmount" type="text" inputmode="decimal" autocomplete="off" required aria-describedby="budget-commitments"></div>
+              <div class="budget-presets" aria-label="Montants proposés"><button class="button secondary" type="button" data-budget-preset="100">100 $</button><button class="button secondary" type="button" data-budget-preset="250">250 $</button></div>
+              <div class="budget-scopes" role="group" aria-label="Mois concernés">
+                <label><input type="radio" name="budget-scope" value="month_only" checked> Ce mois-ci seulement</label>
+                <label><input type="radio" name="budget-scope" value="current_and_future"> Ce mois-ci et les mois suivants</label>
+              </div>
+              <button id="budget-review" class="button secondary" type="submit">Vérifier la modification</button>
+            </fieldset>
+          </form>
+          <p id="budget-operation-error" class="inline-error" role="alert" hidden></p>
+          <button id="budget-retry" class="button secondary" type="button" hidden>Réessayer la même modification</button>
+        </div>
+      </section>
+
+      <details id="employees-panel" class="employees-panel surface" hidden>
+        <summary><span><span class="eyebrow">Gestionnaire</span><strong>Accès des employés</strong></span><span aria-hidden="true">＋</span></summary>
+        <div class="employees-body">
+          <p>Chaque employé utilise son courriel et le code de connexion reçu par courriel. Aucun compte Cloudflare ni mot de passe à créer. La désactivation retire immédiatement l’accès au registre.</p>
+          <div id="employee-list" class="employee-list" aria-live="polite"></div>
+          <p id="employees-error" class="inline-error" role="status" hidden></p>
+          <form id="employee-form" class="employee-form">
+            <h3>Autoriser un employé</h3>
+            <div class="field"><label for="employee-add-name">Nom de l’employé</label><input id="employee-add-name" name="name" maxlength="120" autocomplete="name" required></div>
+            <div class="field"><label for="employee-add-email">Courriel de connexion</label><input id="employee-add-email" name="email" type="email" maxlength="254" autocomplete="email" required></div>
+            <p class="muted">Rôle employé : recherche et validation des bons. Le budget, les exceptions et les accès restent réservés au gestionnaire.</p>
+            <button id="employee-add-confirm" class="button primary" type="submit">Autoriser ce courriel</button>
+          </form>
+        </div>
+      </details>
+      <dialog id="employee-dialog" aria-labelledby="employee-dialog-title">
+        <form id="employee-status-form" class="dialog-content">
+          <span class="eyebrow">Accès au registre</span><h2 id="employee-dialog-title">Modifier cet accès ?</h2>
+          <p id="employee-dialog-summary"></p><p id="employee-dialog-error" class="inline-error" role="alert" hidden></p>
+          <div class="dialog-actions"><button id="employee-cancel" class="button secondary" type="button">Annuler</button><button id="employee-confirm" class="button primary" type="submit">Confirmer</button></div>
+        </form>
+      </dialog>
+
+      <details id="operations-panel" class="employees-panel surface" hidden>
+        <summary><span><span class="eyebrow">Gestionnaire</span><strong>Historique des opérations</strong></span><span aria-hidden="true">＋</span></summary>
+        <div class="employees-body">
+          <p>Les 200 dernières opérations conservées dans le registre, avec le responsable et l’heure du Québec. L’historique de chaque bon reste accessible dans sa fiche.</p>
+          <button id="operations-refresh" class="button secondary" type="button">Actualiser l’historique</button>
+          <p id="operations-state" class="overview-note" role="status"></p><ol id="operations-list" class="audit-list operations-list"></ol>
+        </div>
+      </details>
+
       <details id="procedure" class="procedure surface">
-        <summary><span><span class="eyebrow">À garder sous la main</span><strong>La remise en 3 étapes</strong></span><span class="summary-chevron" aria-hidden="true">+</span></summary>
+        <summary><span><span class="eyebrow">À garder sous la main</span><strong>Le rabais en 3 étapes</strong></span><span class="summary-chevron" aria-hidden="true">+</span></summary>
         <div class="procedure-body">
           <ol class="procedure-steps">
-            <li><span class="step-number">1</span><div><h3>Vérifier et utiliser le code</h3><p>Vérifiez le nom, la valeur et la date limite. Cliquez sur « MARQUER COMME UTILISÉ », puis confirmez. Attendez que la fiche affiche « En cours de remise » à votre nom.</p></div></li>
-            <li><span class="step-number">2</span><div><h3>Créer la carte dans Lightspeed</h3><p>Après la validation, créez manuellement une seule carte-cadeau du montant indiqué. Remettez-la au client. Cette page ne crée aucune carte dans Lightspeed.</p></div></li>
-            <li><span class="step-number">3</span><div><h3>Confirmer la remise</h3><p>Saisissez la référence Lightspeed, cochez la remise réelle au client et confirmez. Seul l’employé qui a utilisé le code peut terminer la remise.</p></div></li>
+            <li><span class="step-number">1</span><div><h3>Vérifier et prendre en charge</h3><p>Vérifiez le nom, la valeur et la date limite. Cliquez sur « PRENDRE EN CHARGE », puis confirmez. Attendez que la fiche affiche « Pris en charge » à votre nom.</p></div></li>
+            <li><span class="step-number">2</span><div><h3>Appliquer le rabais sur la facture</h3><p>Après la confirmation, appliquez manuellement une seule fois le rabais dans Lightspeed, exclusivement sur les aliments admissibles. Aucun rabais direct ou indirect sur l’alcool. Si les aliments valent moins que le bon, appliquez seulement leur valeur et le reliquat est perdu. Une facture uniquement alcoolisée est refusée.</p></div></li>
+            <li><span class="step-number">3</span><div><h3>Confirmer le rabais appliqué</h3><p>Cochez « Le rabais a été appliqué sur la facture », puis confirmez. Seul l’employé ayant pris en charge le code peut terminer.</p></div></li>
           </ol>
-          <p class="procedure-note"><strong>En cas de doute, n’émettez pas une deuxième carte.</strong> Un code « En cours de remise » est déjà utilisé. L’employé concerné doit reprendre sa fiche et vérifier Lightspeed. Si une erreur apparaît après confirmation, actualisez d’abord le registre.</p>
-          <p class="muted">La date limite de 30 jours concerne l’utilisation du code de récompense. Elle ne représente pas la date d’expiration de la carte-cadeau. Chaque employé utilise son compte individuel, puis se déconnecte sur un appareil partagé.</p>
+          <p class="procedure-note"><strong>En cas de doute, n’appliquez pas un deuxième rabais.</strong> Un code « Pris en charge » est verrouillé. L’employé concerné doit vérifier la facture avant de reprendre. Si une erreur apparaît après confirmation, actualisez d’abord le registre.</p>
+          <p class="muted">Le code est utilisable dans les 30 jours suivant son attribution. Chaque employé utilise son compte individuel, puis se déconnecte sur un appareil partagé.</p>
         </div>
       </details>
       <footer class="page-footer"><span>Les Boréalistes × GOAT</span><span>Accès réservé aux employés autorisés</span></footer>
@@ -103,11 +183,20 @@
   <dialog id="claim-dialog" aria-labelledby="claim-dialog-title">
     <form id="claim-form" class="dialog-content">
       <span class="eyebrow">Validation du code</span>
-      <h2 id="claim-dialog-title">Marquer comme utilisé ?</h2>
+      <h2 id="claim-dialog-title">Prendre en charge ce code ?</h2>
       <p id="claim-summary"></p>
-      <p>Cette action utilise définitivement le code à votre nom. Attendez la confirmation avant de créer une seule carte dans Lightspeed.</p>
+      <p>Cette action verrouille le code à votre nom. Attendez la confirmation avant d’appliquer manuellement le rabais sur la facture.</p>
       <p id="claim-dialog-error" class="inline-error" role="alert" hidden></p>
-      <div class="dialog-actions"><button id="claim-cancel" class="button secondary" type="button">Annuler</button><button id="claim-confirm" class="button primary" type="submit">Confirmer l’utilisation</button></div>
+      <div class="dialog-actions"><button id="claim-cancel" class="button secondary" type="button">Annuler</button><button id="claim-confirm" class="button primary" type="submit">Confirmer la prise en charge</button></div>
+    </form>
+  </dialog>
+  <dialog id="budget-dialog" aria-labelledby="budget-dialog-title">
+    <form id="budget-confirm-form" class="dialog-content">
+      <span class="eyebrow">Budget interne · Responsable</span>
+      <h2 id="budget-dialog-title">Confirmer le nouveau budget</h2>
+      <p id="budget-confirmation-summary"></p>
+      <p>Les montants déjà attribués et réservés restent engagés. Cette modification ne change pas les récompenses existantes.</p>
+      <div class="dialog-actions"><button id="budget-cancel" class="button secondary" type="button">Annuler</button><button id="budget-confirm" class="button primary" type="submit">Confirmer la modification</button></div>
     </form>
   </dialog>
   <noscript><p class="noscript">Activez JavaScript pour utiliser l’espace employés et vérifier les codes des clients.</p></noscript>

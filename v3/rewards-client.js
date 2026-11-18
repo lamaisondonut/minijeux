@@ -6,8 +6,8 @@ const panel = $('rewardClaim');
 const note = $('rewardStartNote');
 const money = cents => new Intl.NumberFormat('fr-CA', { style: 'currency', currency: 'CAD', maximumFractionDigits: 0 }).format(cents / 100);
 const modeLabel = mode => mode === 'extreme' ? 'Défi extrême' : 'Mode récompenses';
-const CONSENT_VERSION = 'rewards-2026-11-v1';
-let busy = false, run = null, pendingSession = null, challenge = null;
+const CONSENT_VERSION = 'rewards-no-sms-2026-11-v1';
+let busy = false, run = null, pendingSession = null, challenge = null, knownDeviceRestriction=null;
 let turnstileLoad;
 const reasonText = {
   invalid_code: 'Le code SMS est incorrect. Réessaie avec le code reçu.',
@@ -19,8 +19,11 @@ const reasonText = {
   configuration_pending: 'Les récompenses sont indisponibles pour le moment. Tu peux jouer en mode libre, sans récompense.',
   verification_unavailable: 'La vérification est temporairement indisponible. Réessaie dans quelques instants.',
   sms_daily_limit: 'La vérification SMS est indisponible pour le moment. Réessaie plus tard.',
+  verification_replaced:'Cette vérification a été remplacée. Utilise le dernier SMS demandé.',
+  sms_wait:'Attends le délai indiqué avant de demander un nouveau code.',
+  sms_send_limit:'La limite de cinq demandes SMS pour cette partie est atteinte.',
   phone_bound: 'Utilise le même numéro de téléphone que lors de ta première demande pour cette partie.',
-  consent_required: 'Accepte les conditions de la récompense avant de demander ton SMS.',
+  consent_required: 'Accepte les conditions de la récompense pour confirmer ton gain.',
   profile_missing: 'Ton prénom et ton nom sont requis pour confirmer le gain.',
   turnstile_required: 'Termine la vérification de sécurité avant de commencer.',
   turnstile_failed: 'La vérification de sécurité a échoué. Réessaie.',
@@ -56,15 +59,16 @@ async function api(path, data) {
   catch { throw new Error('Le service est temporairement indisponible. Réessaie.'); }
   finally { clearTimeout(timer); }
   let body; try { body = await response.json(); } catch { throw new Error('Le service est temporairement indisponible. Réessaie.'); }
-  if (!response.ok) { const error = new Error(reasonText[body.reason || body.error] || 'La demande n’a pas pu être terminée. Réessaie.'); error.status = response.status; error.reason = body.reason || body.error; throw error; }
+  if (!response.ok) { const error = new Error(reasonText[body.reason || body.error] || 'La demande n’a pas pu être terminée. Réessaie.'); error.status = response.status; error.reason = body.reason || body.error;error.retryAfter=body.retryAfter;error.nextEligibleAt=body.nextEligibleAt; throw error; }
   return body;
 }
 function currentStatus() {
   return window.BorealRewardMenu?.getStatus?.() || { mode: 'pending', rewardsEnabled: false, capCents: 0 };
 }
+function phoneMode(value){return value?.phoneVerificationMode==='sms'?'sms':'unverified';}
 function conditions(status) {
   if (status.mode === 'extreme') return 'Défi extrême : vitesse et difficulté accrues. Aucune récompense monétaire.';
-  if (status.rewardsEnabled && status.mode === 'rewards') return `Mode récompenses. Maximum annoncé : ${money(status.capCents)}. Une récompense par personne tous les 30 jours, après vérification SMS. Partie admissible pendant 30 minutes, pauses comprises.`;
+  if (status.rewardsEnabled && status.mode === 'rewards') return `Mode récompenses. Maximum annoncé : ${money(status.capCents)}. Une récompense par numéro tous les 30 jours. ${phoneMode(status)==='sms'?'Vérification SMS après la partie.':'Téléphone demandé après un gain admissible, sans vérification SMS.'} Partie admissible pendant 30 minutes, pauses comprises.`;
   return 'Mode libre — sans récompense. Joue sans compte pour battre ton record.';
 }
 async function securityToken(sitekey) {
@@ -125,13 +129,13 @@ function launch(session, practice = false) {
     onEnd() { thisRun.finished = true; finish(thisRun); }
   });
 }
-function startPractice() {
+function startPractice(restriction=null) {
   if (!game?.ready) return;
-  launch({ seed: crypto.getRandomValues(new Uint32Array(1))[0], mode: 'rewards', capCents: 0, expiresAt: null }, true);
+  launch({ seed: crypto.getRandomValues(new Uint32Array(1))[0], mode: 'rewards', capCents: 0, expiresAt: null, rewardRestriction:restriction }, true);
 }
 function confirmMode(session) {
   pendingSession = session;
-  const box = showPanel('Le mode disponible a changé', `${conditions({ mode: session.mode, rewardsEnabled: session.mode === 'rewards', capCents: session.capCents })} La difficulté sera fixée pour toute la partie.`);
+  const box = showPanel('Le mode disponible a changé', `${conditions({ mode: session.mode, rewardsEnabled: session.mode === 'rewards', capCents: session.capCents,phoneVerificationMode:session.phoneVerificationMode })} La difficulté sera fixée pour toute la partie.`);
   button(box, `Commencer en ${modeLabel(session.mode)}`, () => { hidePanel(); start(); });
   button(box, 'Retour au menu', () => { pendingSession = null; hidePanel(); }, false);
 }
@@ -144,23 +148,26 @@ async function start() {
       if (Date.parse(session.expiresAt) <= Date.now()) { pendingSession = null; throw new Error('Le délai pour commencer cette partie est écoulé. Commence une nouvelle partie.'); }
       launch(session); return;
     }
+    if(knownDeviceRestriction&&Date.parse(knownDeviceRestriction.nextEligibleAt)>Date.now()){startPractice(knownDeviceRestriction);return;}
     await window.BorealRewardMenu?.ready;
     const status = currentStatus();
     if (status.mode === 'pending' || (status.mode !== 'extreme' && !status.rewardsEnabled)) { startPractice(); return; }
     const size = game.dimensions(); const expectedMode = status.mode;
     const turnstileToken = expectedMode === 'rewards' ? await securityToken(status.turnstileSiteKey) : undefined;
     const session = await api('/api/games/start', { width: Math.round(size.width), height: Math.round(size.height), expectedMode, ...(turnstileToken ? { turnstileToken } : {}) });
+    if(session.playOnly&&session.rewardRestriction){knownDeviceRestriction=session.rewardRestriction;startPractice(knownDeviceRestriction);return;}
     if (session.engineVersion !== ENGINE_VERSION || !['rewards', 'extreme'].includes(session.mode) || !Number.isInteger(session.seed) || !session.sessionId || !Number.isFinite(Date.parse(session.expiresAt))) throw new Error('Le jeu a été mis à jour. Recharge la page avant une partie récompensée.');
     if (session.mode === 'rewards' && ![500, 1000, 2000].includes(session.capCents)) throw new Error('Aucune récompense ne peut être annoncée pour cette partie.');
     session.initialWidth = session.width ?? Math.round(size.width); session.initialHeight = session.height ?? Math.round(size.height);
     const changedCap = session.mode === 'rewards' && session.capCents !== status.capCents;
     if (session.requiresModeConfirmation || session.mode !== expectedMode || changedCap) { confirmMode(session); return; }
     launch(session);
-  } catch (error) { startError(error); }
+  } catch (error) { if(error.status===429)startPractice(knownDeviceRestriction);else startError(error); }
   finally { setBusy(false); }
 }
 async function finish(thisRun) {
   if (thisRun.practice) {
+    if(thisRun.session.rewardRestriction&&thisRun.state.score>=5000){showRestricted(thisRun.session.rewardRestriction);return;}
     $('feedback').textContent = 'Mode libre terminé — sans récompense. Rejoue pour battre ton record, sans compte.';
     return;
   }
@@ -172,7 +179,8 @@ async function finish(thisRun) {
       if (!Number.isSafeInteger(result.score) || result.score < 0 || result.mode !== thisRun.session.mode) throw new Error('La vérification de la partie est incomplète. Réessaie.');
       thisRun.result = result;
       $('finalScore').textContent = result.score.toLocaleString('fr-CA');
-      if (result.eligible && result.mode === 'rewards') { showWinner(thisRun); resultAction('Continuer la vérification SMS', () => challenge?.run === thisRun ? showSmsCode(challenge) : showWinner(thisRun)); }
+      if(result.rewardRestriction){showRestricted(result.rewardRestriction);return;}
+      if (result.eligible && result.mode === 'rewards') { showWinner(thisRun); resultAction(phoneMode(thisRun.session)==='sms'?'Continuer la vérification SMS':'Réclamer mon code', () => challenge?.run === thisRun ? showSmsCode(challenge) : showWinner(thisRun)); }
       else {
         const text = result.mode === 'extreme' ? 'Défi extrême terminé. Ce mode ne donne aucune récompense monétaire.' : 'Partie vérifiée. Le score ne donne pas droit à une récompense.';
         $('feedback').textContent = text;
@@ -202,28 +210,72 @@ function field(form, label, name, attributes) {
   const wrap = document.createElement('label'); wrap.textContent = label;
   const input = document.createElement('input'); input.name = name; Object.assign(input, attributes); wrap.append(input); form.append(wrap); return input;
 }
+function smsGate(thisRun,control,label){
+  const update=()=>{const seconds=Math.max(0,Math.ceil(((thisRun.nextSmsAt||0)-Date.now())/1000));control.disabled=Boolean(thisRun.smsSending)||seconds>0||thisRun.sendsRemaining===0;control.textContent=thisRun.sendsRemaining===0?'Limite de demandes atteinte':seconds>0?label+' ('+seconds+' s)':label;};update();
+  const timer=setInterval(()=>{if(!control.isConnected){clearInterval(timer);return;}update();},1000);
+}
+function rememberSms(thisRun,result){thisRun.nextSmsAt=Date.parse(result.nextSendAt)||Date.now()+60000;thisRun.sendsRemaining=result.sendsRemaining;}
+function showRestricted(restriction,thisRun=null) {
+  const text='Tu as déjà remporté une récompense au cours des 30 derniers jours. Tu peux continuer à jouer autant que tu le souhaites et tenter de battre ton record ! Tu pourras réclamer une nouvelle récompense lorsque ta période de 30 jours sera terminée.';
+  const box=showPanel('Bravo pour ton score ! 🌲',text);
+  if(restriction.nextEligibleAt){const p=document.createElement('p');p.textContent='Prochaine admissibilité : '+new Date(restriction.nextEligibleAt).toLocaleString('fr-CA',{timeZone:'America/Toronto'});box.append(p);}
+  if(restriction.reason==='device_cooldown')knownDeviceRestriction=restriction;
+  $('feedback').textContent=text;
+  if(thisRun&&restriction.reason==='phone_cooldown')button(box,'Corriger mes renseignements',()=>{thisRun.claimRequest=null;showWinner(thisRun);},false);
+  button(box,'Voir le résultat',hidePanel,false);
+}
 function showWinner(thisRun) {
+  if(phoneMode(thisRun.session)==='sms')return showSmsWinner(thisRun);
+  const box=showPanel(`${thisRun.result.score.toLocaleString('fr-CA')} points vérifiés`,`Entre ton nom complet et ton téléphone pour confirmer ton gain. Une seule récompense par numéro tous les 30 jours. Maximum annoncé : ${money(thisRun.session.capCents)}.${thisRun.result.claimDeadline?' Demande à terminer avant '+new Date(thisRun.result.claimDeadline).toLocaleTimeString('fr-CA',{hour:'2-digit',minute:'2-digit'})+'.':''}`);
+  const form=document.createElement('form');box.append(form);
+  const first=field(form,'Prénom','firstName',{required:true,maxLength:80,autocomplete:'given-name'}),last=field(form,'Nom','lastName',{required:true,maxLength:80,autocomplete:'family-name'}),phone=field(form,'Téléphone (ex. +15145551234)','phone',{required:true,type:'tel',autocomplete:'tel',maxLength:24});
+  const information=document.createElement('p');information.textContent='Aucun SMS ne sera envoyé. Le numéro n’est pas vérifié ; il est enregistré avec ton nom pour retrouver ta récompense et limiter les gains.';form.append(information);
+  const consent=field(form,'J’accepte les conditions du bon et l’enregistrement de mon nom et de mon téléphone pour gérer ma récompense.','consent',{required:true,type:'checkbox'});consent.parentElement.className='consent';
+  const previous=thisRun.claimRequest||thisRun.profile;
+  if(previous){first.value=previous.firstName;last.value=previous.lastName;phone.value=previous.phone;consent.checked=true;}
+  const error=document.createElement('p');error.role='status';form.append(error);
+  const submit=document.createElement('button');submit.type='submit';submit.className='primary';submit.textContent=thisRun.claimRequest?'Réessayer ma demande':'Obtenir mon code';form.append(submit);
+  const lock=(locked,keepRetry=false)=>{for(const control of form.elements)control.disabled=locked;submit.disabled=locked&&!keepRetry;};
+  if(thisRun.claimRequest)lock(true,true);
+  form.addEventListener('submit',async event=>{
+    event.preventDefault();if(thisRun.claimSending||!form.reportValidity())return;thisRun.claimSending=true;lock(true);error.textContent='';
+    thisRun.claimRequest ||= {sessionId:thisRun.session.sessionId,firstName:first.value.trim(),lastName:last.value.trim(),phone:phone.value.trim(),consentVersion:CONSENT_VERSION};thisRun.profile={...thisRun.claimRequest};
+    try{
+      const result=await api('/api/rewards/claim',thisRun.claimRequest);
+      if(result.awarded&&result.reward?.code&&[500,1000,2000].includes(result.reward.valueCents)&&result.reward.confirmedAt&&result.reward.claimBy){thisRun.claimRequest=null;showAward(result);}
+      else {const problem=new Error(reasonText[result.reason]||'Le gain n’a pas été confirmé. Vérifie les informations de ta demande.');problem.status=409;throw problem;}
+    }catch(problem){if(['phone_cooldown','device_cooldown'].includes(problem.reason)){thisRun.claimRequest=null;showRestricted({reason:problem.reason,nextEligibleAt:problem.nextEligibleAt},thisRun);return;}error.textContent=problem.message;if(problem.status>=400&&problem.status<500){thisRun.claimRequest=null;lock(false);submit.textContent='Obtenir mon code';}else{lock(true,true);submit.textContent='Réessayer ma demande';error.textContent+=' Ta demande est conservée : réessaie avec les mêmes informations pour retrouver le même code.';}}
+    finally{thisRun.claimSending=false;}
+  });
+  button(box,'Plus tard sur cette page',hidePanel,false);
+}
+function showSmsWinner(thisRun) {
   const box = showPanel(`${thisRun.result.score.toLocaleString('fr-CA')} points vérifiés`, `Palier admissible, sous réserve de la vérification SMS et de la règle d’une récompense par personne tous les 30 jours. Maximum annoncé : ${money(thisRun.session.capCents)}. Aucun code n’est attribué avant la confirmation du gain.${thisRun.result.claimDeadline ? ' Vérification à terminer avant ' + new Date(thisRun.result.claimDeadline).toLocaleTimeString('fr-CA', { hour: '2-digit', minute: '2-digit' }) + '.' : ''}`);
   const form = document.createElement('form'); box.append(form);
   const first = field(form, 'Prénom', 'firstName', { required: true, maxLength: 80, autocomplete: 'given-name' });
   const last = field(form, 'Nom', 'lastName', { required: true, maxLength: 80, autocomplete: 'family-name' });
   const phone = field(form, 'Téléphone mobile (ex. +15145551234)', 'phone', { required: true, type: 'tel', autocomplete: 'tel', maxLength: 24 });
   const consent = field(form, 'J’accepte la vérification SMS et les conditions de la récompense. Mon numéro sert à vérifier la limite de 30 jours.', 'consent', { required: true, type: 'checkbox' }); consent.parentElement.className = 'consent';
+  if(thisRun.profile){first.value=thisRun.profile.firstName;last.value=thisRun.profile.lastName;phone.value=thisRun.profile.phone;consent.checked=true;}
   const error = document.createElement('p'); error.role = 'status'; form.append(error);
-  const send = document.createElement('button'); send.className = 'primary'; send.textContent = 'Recevoir mon code SMS'; form.append(send);
+  const send = document.createElement('button'); send.className = 'primary'; send.textContent = 'Recevoir mon code SMS'; form.append(send);smsGate(thisRun,send,'Recevoir mon code SMS');
   form.addEventListener('submit', async event => {
-    event.preventDefault(); if (!form.reportValidity()) return; send.disabled = true; error.textContent = '';
+    event.preventDefault(); if (thisRun.smsSending || !form.reportValidity()) return;thisRun.smsSending=true;for(const input of form.elements)input.disabled=true; send.disabled = true; error.textContent = '';
+    thisRun.profile={phone:phone.value.trim(),firstName:first.value.trim(),lastName:last.value.trim()};
     try {
       const result = await api('/api/rewards/sms/request', { sessionId: thisRun.session.sessionId, phone: phone.value.trim(), firstName: first.value.trim(), lastName: last.value.trim(), consentVersion: CONSENT_VERSION });
       if (!result.challengeId) throw new Error('Le service SMS n’a pas confirmé la demande. Réessaie.');
-      challenge = { id: result.challengeId, phone: phone.value.trim(), run: thisRun };
+      rememberSms(thisRun,result);
+      challenge = { id: result.challengeId, phone: thisRun.profile.phone, run: thisRun };
       showSmsCode(challenge);
-    } catch (problem) { error.textContent = problem.message; send.disabled = false; }
+    } catch (problem) { error.textContent = problem.message;if(problem.retryAfter)thisRun.nextSmsAt=Date.now()+problem.retryAfter*1000;send.disabled=false;smsGate(thisRun,send,'Recevoir mon code SMS'); }finally{thisRun.smsSending=false;if(form.isConnected){for(const input of form.elements)input.disabled=false;smsGate(thisRun,send,'Recevoir mon code SMS');}}
   });
   button(box, 'Plus tard sur cette page', hidePanel, false);
 }
 function showSmsCode(currentChallenge) {
+  const thisRun=currentChallenge.run;
   const box = showPanel('Vérifie ton téléphone', 'Entre le code reçu par SMS pour confirmer ton admissibilité. Ton gain sera confirmé après cette vérification.');
+  const destination=document.createElement('p');destination.textContent='SMS demandé au '+currentChallenge.phone+'. Tu peux corriger ce numéro avant la confirmation.';box.append(destination);
   const form = document.createElement('form'); box.append(form);
   const code = field(form, 'Code SMS', 'code', { required: true, inputMode: 'numeric', autocomplete: 'one-time-code', maxLength: 8, pattern: '[0-9]{6}' });
   const error = document.createElement('p'); error.role = 'status'; form.append(error);
@@ -236,31 +288,49 @@ function showSmsCode(currentChallenge) {
       else { error.textContent = reasonText[result.reason] || 'Aucune récompense attribuée. La limite est d’une récompense par personne tous les 30 jours.'; verify.disabled = false; }
     } catch (problem) { error.textContent = problem.message; verify.disabled = false; }
   });
+  const change=button(box,'Modifier mon numéro',()=>showWinner(thisRun),false);
+  const resend=button(box,'Renvoyer le code',async()=>{
+    if(thisRun.smsSending)return;thisRun.smsSending=true;resend.disabled=true;verify.disabled=true;code.disabled=true;change.disabled=true;error.textContent='';try{
+      const result=await api('/api/rewards/sms/request',{sessionId:thisRun.session.sessionId,...thisRun.profile,consentVersion:CONSENT_VERSION});
+      if(!result.challengeId)throw Error('Demande non confirmée');rememberSms(thisRun,result);challenge={id:result.challengeId,phone:thisRun.profile.phone,run:thisRun};showSmsCode(challenge);
+    }catch(problem){error.textContent=problem.message;if(problem.retryAfter)thisRun.nextSmsAt=Date.now()+problem.retryAfter*1000;smsGate(thisRun,resend,'Renvoyer le code');}finally{thisRun.smsSending=false;if(form.isConnected){verify.disabled=false;code.disabled=false;change.disabled=false;}}
+  },false);smsGate(thisRun,resend,'Renvoyer le code');
   button(box, 'Revenir au résultat', hidePanel, false);
 }
 function showAward(result) {
   const reward = result.reward;
+  if(reward.confirmedAt)knownDeviceRestriction={reason:'device_cooldown',nextEligibleAt:new Date(Date.parse(reward.confirmedAt)+2592000000).toISOString()};
   const scoreText = Number.isSafeInteger(result.score) ? `Score vérifié : ${result.score.toLocaleString('fr-CA')} points. ` : '';
   const usable = reward.status === 'pending' && Date.parse(reward.claimBy) > Date.now();
-  const statuses = { claimed: 'Ce code a déjà été présenté au restaurant.', issued: 'La carte-cadeau associée a déjà été remise.', cancelled: 'Cette récompense a été annulée.', expired: 'Le délai de présentation de ce code est écoulé.' };
-  const details = usable ? `Présente ce code en personne aux Boréalistes avant le ${new Date(reward.claimBy).toLocaleDateString('fr-CA')}. Code à usage unique, valable 30 jours après attribution. Ce bon permet de réclamer ta carte-cadeau : le personnel la créera et te la remettra sur place. Le code n’est pas une carte-cadeau déjà émise.` : (statuses[reward.status] || 'Le délai de présentation de ce code est écoulé.');
-  const box = showPanel(`${money(reward.valueCents)} attribués`, scoreText + details);
+  const statuses = { claimed: 'Ce code est pris en charge par le personnel du restaurant.', issued: 'Le rabais associé à ce code a déjà été appliqué.', cancelled: 'Cette récompense a été annulée.', expired: 'Le délai de présentation de ce code est écoulé.' };
+  const details = usable ? `Présente ce code en personne aux Boréalistes avant le ${new Date(reward.claimBy).toLocaleDateString('fr-CA')}. Code à usage unique, valable 30 jours après attribution. Ce bon donne droit au rabais indiqué sur ta facture, après validation par le personnel. Il est utilisable une seule fois.` : (statuses[reward.status] || 'Le délai de présentation de ce code est écoulé.');
+  const box = showPanel(`${money(reward.valueCents)} de rabais sur les aliments`, scoreText + details);
+  const food = document.createElement('p'); food.className='reward-food-conditions'; food.textContent='Applicable exclusivement aux aliments vendus au restaurant Les Boréalistes. Aucun rabais direct ou indirect sur les boissons alcooliques. Une facture mixte est admissible pour sa portion alimentaire seulement ; une facture contenant uniquement de l’alcool ne l’est pas. Le rabais est limité à la valeur des aliments admissibles. Toute portion inutilisée est perdue, sans échange contre de l’argent.';box.append(food);
   const code = document.createElement('p'); code.className = 'reward-code'; code.textContent = reward.code; box.append(code);
   button(box, 'Copier le code', async event => {
     try { await navigator.clipboard.writeText(reward.code); event.currentTarget.textContent = 'Code copié'; } catch { code.focus(); }
   });
+  const identity=document.createElement('p');identity.textContent=[reward.firstName,reward.lastName].filter(Boolean).join(' ');if(identity.textContent)box.append(identity);
+  if(reward.phoneVerified===false || (reward.phoneVerified===undefined&&phoneMode(currentStatus())==='unverified')){const unverified=document.createElement('p');unverified.textContent='Téléphone déclaré, non vérifié par SMS. Une récompense par numéro tous les 30 jours.';box.append(unverified);}
+  const saved=document.createElement('p');saved.textContent='Conserve ce code par capture d’écran. Tu peux aussi le copier.';box.append(saved);
+  if (usable && currentStatus().notificationSmsEnabled===true) button(box, 'Renvoyer le code par SMS', () => {
+    const form=document.createElement('form'),label=document.createElement('label'),input=document.createElement('input'),send=document.createElement('button'),status=document.createElement('p');
+    label.textContent='Ton numéro vérifié pour cette récompense';input.type='tel';input.autocomplete='tel';input.required=true;label.append(input);send.type='submit';send.textContent='Confirmer le renvoi';form.append(label,send,status);box.append(form);
+    const requestId=crypto.randomUUID().replaceAll('-','');
+    form.addEventListener('submit',async event=>{event.preventDefault();send.disabled=true;try{const r=await fetch('/api/rewards/notification',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({rewardId:reward.id,phone:input.value,requestId})});const data=await r.json();if(!r.ok)throw Error(data.message||'Renvoi indisponible');status.textContent=data.notification.status==='accepted'?'SMS pris en charge par le fournisseur.':data.notification.status==='disabled'?'Envoi SMS désactivé. Conserve ton code affiché ici.':'Envoi non confirmé. Conserve ton code et vérifie tes messages avant un nouveau renvoi.';}catch(e){status.textContent=e.message;}finally{send.disabled=false;}});
+  },false);
   button(box, 'Voir le résultat', hidePanel, false);
   $('feedback').textContent = `${money(reward.valueCents)} attribués. ${details}`;
   resultAction('Afficher mon code attribué', () => showAward(result));
   challenge = null; window.BorealRewardMenu?.refresh?.();
 }
 async function recoverAward() {
-  const box = showPanel('Retrouver un code confirmé', 'Recherche d’une récompense déjà attribuée après vérification SMS dans ce navigateur.');
+  const box = showPanel('Retrouver un code confirmé', 'Recherche d’une récompense déjà attribuée dans ce navigateur.');
   try {
     const response = await fetch('/api/rewards/confirmation', { credentials: 'same-origin', cache: 'no-store' });
     const result = await response.json();
     if (response.ok && result.reward?.code && [500,1000,2000].includes(result.reward.valueCents) && result.reward.confirmedAt && result.reward.claimBy) { showAward(result); return; }
-    const empty = showPanel('Aucun code confirmé trouvé', 'Aucun code attribué n’est associé à ce navigateur. La vérification SMS est proposée après une partie admissible.');
+    const empty = showPanel('Aucun code confirmé trouvé', 'Aucun code attribué n’est associé à ce navigateur. Le formulaire de gain est proposé après une partie admissible.');
     button(empty, 'Retour au menu', hidePanel);
   } catch {
     const retry = showPanel('Recherche à réessayer', 'Le service est temporairement indisponible.');
