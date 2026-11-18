@@ -5,9 +5,14 @@
   const money=value=>new Intl.NumberFormat('fr-CA',{style:'currency',currency:'CAD'}).format(value/100);
   async function api(path,body) {
     const response=await fetch('/api/admin/'+path,{method:body?'POST':'GET',credentials:'same-origin',cache:'no-store',headers:{Accept:'application/json',...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});
+    if(response.status===401||response.status===403)document.dispatchEvent(new CustomEvent('boreal:admin-expired',{detail:{status:response.status}}));
     const data=await response.json();if(!response.ok){const e=Error(data.message||'Opération indisponible');e.status=response.status;throw e;}return data;
   }
-  api('me').then(({employee,notificationSmsEnabled})=>{
+  let currentSection=null,generation=0;
+  document.addEventListener('boreal:admin-session',event=>{
+    const epoch=++generation;currentSection?.remove();currentSection=null;
+    const {employee}=event.detail||{},notificationSmsEnabled=employee?.notificationSmsEnabled;
+
     if(employee?.role!=='manager')return;
     const section=node('section');section.className='surface manual-panel';section.style.padding='24px';section.style.marginBottom='24px';
     section.append(node('h2','Créer un bon manuellement'),node('p','Réservé au gestionnaire. Le bon est à usage unique, valable 30 jours et applicable aux aliments seulement. Le téléphone déclaré sert au contrôle des 30 jours et n’est pas vérifié par SMS.'));
@@ -19,14 +24,14 @@
     const valueLabel=node('label','Valeur du bon');valueLabel.className='field';const value=node('select');value.name='valueCents';for(const cents of [500,1000,2000]){const option=node('option',money(cents));option.value=cents;value.append(option);}valueLabel.append(value);form.append(valueLabel);
     const quoteButton=node('button','Vérifier le budget et les exceptions');quoteButton.type='submit';quoteButton.className='button secondary';form.append(quoteButton);section.append(form);
     const review=node('div'),message=node('p');message.setAttribute('role','status');section.append(review,message);
-    document.querySelector('.workspace').before(section);
+    currentSection=section;section.id='manual-reward-panel';document.querySelector('.budget-panel').after(section);
     let quoted=null,operation=null,busy=false;
     const clear=()=>{if(operation)return;quoted=null;review.replaceChildren();};form.addEventListener('input',clear);
     function lock(locked){for(const input of form.elements)input.disabled=locked;}
     form.addEventListener('submit',async event=>{
       event.preventDefault();if(busy||operation)return;busy=true;lock(true);message.textContent='Vérification…';
       try {
-        quoted=await api('manual-rewards/quote',{phone:inputs.phone.value,valueCents:Number(value.value)});review.replaceChildren();
+        quoted=await api('manual-rewards/quote',{phone:inputs.phone.value,valueCents:Number(value.value)});if(epoch!==generation)return;review.replaceChildren();
         for(const text of ['Plafond mensuel normal : '+money(quoted.budgetCents),'Déjà attribué : '+money(quoted.usedCents),'Réservé pour les parties : '+money(quoted.reservedCents),'Nouveau bon : '+money(quoted.valueCents),'Dépassement total après émission : '+money(quoted.projectedOverrunCents),'Part exceptionnelle de ce nouveau bon : '+money(quoted.additionalExceptionalCents)])review.append(node('p',text));
         review.append(node('p','Cette opération ne change pas le plafond mensuel configuré. Les dépenses exceptionnelles restent comptabilisées dans le mois.'));
         const confirmations={};
@@ -43,16 +48,18 @@
           }
           busy=true;lock(true);confirm.disabled=true;for(const c of review.querySelectorAll('input,textarea'))c.disabled=true;
           try {
-            const data=await api('manual-rewards',operation);const reward=data.reward;review.replaceChildren(node('h3','Bon créé : '+money(reward.valueCents)),node('p','Code : '+reward.code),node('p','Valable jusqu’au '+new Date(reward.claimBy).toLocaleString('fr-CA')),node('p','Applicable exclusivement aux aliments. Aucun rabais sur les boissons alcooliques. Portion inutilisée perdue, sans échange contre de l’argent.'));
+            const data=await api('manual-rewards',operation);if(epoch!==generation)return;const reward=data.reward;review.replaceChildren(node('h3','Bon créé : '+money(reward.valueCents)),node('p','Code : '+reward.code),node('p','Valable jusqu’au '+new Date(reward.claimBy).toLocaleString('fr-CA')),node('p','Applicable exclusivement aux aliments. Aucun rabais sur les boissons alcooliques. Portion inutilisée perdue, sans échange contre de l’argent.'));
             message.textContent=notificationSmsEnabled===true?(data.notification?.status==='accepted'?'SMS pris en charge par le fournisseur.':'Code enregistré. Vérifiez les messages avant tout renvoi.'): 'Code enregistré. Le client peut le conserver par capture d’écran.';
             operation=null;quoted=null;form.reset();document.dispatchEvent(new Event('boreal:admin-changed'));
           } catch(error) {
+            if(epoch!==generation)return;
             message.textContent=error.message;
             if(error.status===409){operation=null;quoted=null;review.replaceChildren();message.textContent+=' Recalculez puis confirmez la nouvelle proposition.';}
             else {confirm.textContent='Réessayer la même émission';message.textContent+=' Réessayez la même émission : la clé conservée empêche un second code.';confirm.disabled=false;}
           } finally {busy=false;if(!operation)lock(false);}
         });
-      } catch(error){message.textContent=error.message;}finally{busy=false;if(!operation)lock(false);}
+      } catch(error){if(epoch!==generation)return;message.textContent=error.message;}finally{busy=false;if(!operation)lock(false);}
     });
-  }).catch(()=>{});
+  });
+  document.dispatchEvent(new Event('boreal:admin-session-request'));
 })();

@@ -159,8 +159,37 @@ async function noSmsLaunchIntegration(script) {
     assert.equal(used.reward.status,'issued');assert.equal(used.reward.phone,phone);
     const reused=await json(await request(endpoint+'/use',{discountApplied:true,foodOnlyConfirmed:true,eligibleFoodCents:2000},winner));assert.equal(reused.reward.issuedAt,used.reward.issuedAt);
     assert.equal((await DB.prepare("SELECT COUNT(*) n FROM audit WHERE reward_id=? AND action='issued'").bind(reward.id).first()).n,1);
+    const dashboard=await json(await request('/api/admin/dashboard',undefined,managerHeaders));
+    assert.equal(dashboard.totals.registeredPlayers,1);
+    assert.equal(dashboard.totals.recordedGames,2); // the cooldown scenario also played a recorded run
+    assert.equal(dashboard.totals.rewardsCount,1);
+    assert.equal(dashboard.totals.usedCount,1);
+    assert.equal(dashboard.totals.activeCount,0);
+    assert.equal(dashboard.totals.valueCents,2000);
+    assert.equal(dashboard.totals.appliedValueCents,2000);
+    assert.equal(dashboard.month.valueCents,2000);
+    assert.equal(dashboard.budget.reservedCents,2000); // its pending claim still reserves the offered tier
+    assert.equal(dashboard.budget.remainingCents,6000);
+    assert.equal(dashboard.coverage.gamesComplete,false);
+    assert.deepEqual(dashboard.tiers.map(t=>[t.valueCents,t.count]),[[500,0],[1000,0],[2000,1]]);
+    assert.equal((await request('/api/admin/employees',undefined,staffHeaders)).status,403);
+    const invited=await json(await request('/api/admin/employees',{email:'new-staff@example.com',name:'Nouvel employé',role:'staff'},managerHeaders));
+    assert.equal(invited.employee.sub,'invite:new-staff@example.com');
+    assert.equal((await json(await request('/api/admin/employees',undefined,managerHeaders))).employees.length,3);
+    const invitedHeaders={'Cf-Access-Jwt-Assertion':jwt('new-staff-identity','new-staff@example.com')};
+    assert.equal((await request('/api/admin/dashboard',undefined,invitedHeaders)).status,200);
+    assert.equal((await DB.prepare('SELECT sub FROM employees WHERE email=?').bind('new-staff@example.com').first()).sub,'new-staff-identity');
+    const revoked=await mfLaunch.dispatchFetch(origin+'/api/admin/employees',{
+      method:'PATCH',headers:{...managerHeaders,Origin:origin,'Content-Type':'application/json'},
+      body:JSON.stringify({sub:'new-staff-identity',active:false}),
+    });
+    assert.equal(revoked.status,200);
+    assert.equal((await request('/api/admin/dashboard',undefined,invitedHeaders)).status,403);
+    assert.equal((await DB.prepare("SELECT COUNT(*) n FROM audit WHERE action='employee_created'").first()).n,1);
+    assert.equal((await DB.prepare("SELECT COUNT(*) n FROM audit WHERE action='employee_deactivated'").first()).n,1);
     assert.deepEqual(forbidden,[]);
     console.log('PASS: launch without any Twilio secrets replays score, reserves budget, issues one direct code, encrypts phone, searches private clients and enforces cooldown and single use');
+    console.log('PASS: real D1 dashboard counts actual awards and manager invitations bind once, audit atomically and revoke existing staff sessions');
   } finally {await mfLaunch.dispose();}
 }
 

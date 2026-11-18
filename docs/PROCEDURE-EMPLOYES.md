@@ -1,10 +1,10 @@
 # Accès quotidien du personnel
 
-Ouvrir [l’administration du restaurant](https://develop-noel-budget-configur.minijeux-4gy.pages.dev/admin/). Aucun compte Cloudflare n’est nécessaire. Se connecter avec son courriel autorisé et le code reçu par courriel au début du service. La session de 24 heures, configurée par l’hébergeur, permet de vérifier plusieurs bons sans reconnexion à chaque code. Ne pas partager les comptes ; se déconnecter en quittant un appareil partagé.
+Ouvrir [l’administration du restaurant](https://develop-noel-budget-configur.minijeux-4gy.pages.dev/admin/). Aucun compte Cloudflare n’est nécessaire. Se connecter avec son courriel autorisé et le code reçu par courriel au début du service. La session persistante, renouvelée par Access selon le réglage de l’hébergeur, permet de vérifier plusieurs bons sans reconnexion quotidienne. Ne pas partager les comptes ; se déconnecter en quittant un appareil partagé.
 
 Le jeu ne demande aucun SMS. Rechercher le client par nom, téléphone ou code. Le téléphone déclaré n’est pas vérifié. La fiche affiche les gains précédents, les dates d’admissibilité et les doublons potentiels. Un gestionnaire peut justifier un déblocage exceptionnel du téléphone ou de l’appareil pour un seul nouveau gain dans les 24 heures, sans effacer les anciens gains ni modifier le budget. Un joueur déjà récompensé peut continuer à jouer.
 
-La procédure de rabais alimentaire ci-dessous reste applicable. En Preview d’essai, utiliser la confirmation sans rabais prévue à cet effet ; ne jamais déclarer qu’un rabais a été appliqué si ce n’est pas le cas.
+La procédure de rabais alimentaire ci-dessous s’applique aux codes réels. Confirmer l’utilisation seulement après application effective du rabais sur la facture.
 
 # Appliquer un bon de rabais — Les Boréalistes
 
@@ -35,7 +35,7 @@ Après une coupure, actualiser la fiche et vérifier **la facture existante** av
 
 ## Gestionnaire : créer un bon manuellement
 
-Dans **Créer un bon manuellement**, saisir le prénom, le nom, le téléphone, la valeur (5 $, 10 $ ou 20 $) et une justification. Le téléphone sert au contrôle des gains et au SMS ; cette action manuelle ne prouve pas une vérification d’identité par SMS.
+Dans **Créer un bon manuellement**, saisir le prénom, le nom, le téléphone, la valeur (5 $, 10 $ ou 20 $) et une justification. Le téléphone sert au registre et au contrôle des gains. Aucun SMS n’est envoyé au lancement ; cette action ne vérifie pas l’identité du client.
 
 Cliquer **Vérifier le budget et les exceptions**. Vérifier le plafond, les montants attribués et réservés, le nouveau bon et le dépassement total exact. Un dépassement exige sa propre case d’autorisation et sa justification. Un gain déjà attribué à ce téléphone depuis 30 jours exige une seconde autorisation avec sa justification. Confirmer ensuite pour obtenir un seul code. Si le budget ou les gains ont changé, recalculer et confirmer les nouveaux chiffres.
 
@@ -43,11 +43,11 @@ Un dépassement reste comptabilisé dans les dépenses et ne relève jamais le p
 
 Après une erreur réseau, utiliser **Réessayer la même émission** : la demande conservée renvoie le code existant. Ne pas repartir avec une nouvelle émission sans vérifier le registre. Après fermeture de la page, rechercher les derniers bons avant de recommencer.
 
-## Budget et SMS
+## Budget et suivi
 
 Le gestionnaire choisit **ce mois-ci seulement** ou **ce mois-ci et les mois suivants jusqu’à modification**. La confirmation rappelle les anciens et nouveaux montants. Les dépenses et réservations existantes sont conservées. Aucun solde inutilisé n’est reporté au mois suivant. Les exceptions restent identifiées dans le mois où elles ont été autorisées.
 
-Le code peut être envoyé par SMS après attribution. Pour le renvoyer, saisir le même téléphone dans la fiche ; les envois sont limités. « Pris en charge par le fournisseur » ne prouve pas la réception. Si un envoi est incertain, vérifier les messages avant un renvoi explicite. Un renvoi conserve le même code et **ne renouvelle pas sa date limite**. Les SMS de vérification et les SMS contenant le bon sont distincts.
+Le code s’affiche après attribution et peut être conservé par le client. Aucun SMS n’est requis ni envoyé au lancement. L’intégration conservée pour une évolution ultérieure n’est pas activée.
 
 L’historique conserve les employés, dates, heures, montants et justifications. Le CSV contient des données clients : le conserver dans un espace autorisé. Se déconnecter sur les appareils partagés.
 

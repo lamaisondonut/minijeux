@@ -104,7 +104,7 @@ const canvasHash=page=>page.evaluate(async()=>{
    await page.goto(origin+'/v3/__home_test__.html');await ready(page);await page.waitForTimeout(150);
    check(await page.locator('#home img').count()===0,`aucun logo dans le menu ${viewport.width}×${viewport.height}`);
    check(await page.locator('.boreal-credit').innerText()==='Un jeu imaginé et développé par GOAT Agence',`signature textuelle conservée ${viewport.width}×${viewport.height}`);
-   check(await page.locator('#home .tips').isVisible()&&await page.locator('#home .tip').count()===3,`indications de jeu visibles ${viewport.width}×${viewport.height}`);
+   check(await page.locator('#home .tip').count()===3&&await page.locator('#how').isVisible(),`conseils et accès au guide conservés ${viewport.width}×${viewport.height}`);
    check((await page.locator('#boreal-home-mode').innerText()).includes('Mode libre — sans récompense'),`mode libre annoncé sans promesse ${viewport.width}×${viewport.height}`);
    await page.waitForFunction(()=>window.__homeHeroDraws.length>0,undefined,{polling:20});
    const hero=await page.evaluate(()=>window.__homeHeroDraws.at(-1));

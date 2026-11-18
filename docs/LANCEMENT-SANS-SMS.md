@@ -1,4 +1,8 @@
-# Version finale de lancement — sans SMS
+# Lancement sans SMS
+
+**Consigne de mise en service actuelle : [MISE-EN-SERVICE.md](MISE-EN-SERVICE.md).**
+Ce guide distingue les opérations effectuées dans le code et les paramètres du compte Cloudflare restant à vérifier. Les conditions ne sont jamais approuvées automatiquement.
+
 
 Cette consigne remplace le parcours SMS antérieur. Branche `develop/noel-budget-configurable`, publication `v3`. Ne pas modifier `livraison-v3` ni la base de production pour les essais.
 
@@ -18,31 +22,31 @@ Les noms et le téléphone sont enregistrés dans D1 ; le téléphone est chiffr
 
 ## Administration simple, sans compte Cloudflare pour le personnel
 
-Le personnel ouvre `/admin/` et se connecte avec son courriel autorisé, par code de connexion reçu par courriel. Configurer une session Access de **24 heures** : une connexion au début du service, puis recherche et validation de plusieurs codes sans nouvelle connexion. Chaque requête vérifie discrètement la session et le compte actif. Un employé révoqué perd immédiatement l’accès ; les émissions manuelles et les exceptions exigent un rôle gestionnaire.
+Le personnel ouvre `/admin/` et se connecte avec son courriel autorisé, par code de connexion reçu par courriel. Configurer une session Access d’application de **7 jours** et une session globale de **1 mois**, avec renouvellement géré par Access : recherche et validation de plusieurs codes sans connexion quotidienne. Chaque requête vérifie discrètement la session et le compte actif. Un employé révoqué perd immédiatement l’accès ; les émissions manuelles et les exceptions exigent un rôle gestionnaire.
 
 Rechercher un nom, un téléphone ou un code, ouvrir la fiche, vérifier les gains antérieurs et la prochaine admissibilité. Les signaux de doublon restent des indices, pas des accusations. Pour un appareil partagé ou une exception téléphonique, le gestionnaire choisit la portée, saisit une justification et autorise **un seul nouveau gain dans les 24 heures**, sous réserve d’une nouvelle partie admissible et du budget disponible. Le déblocage n’efface aucun historique et ne change pas le budget. Le joueur actualise sa page après déblocage d’appareil. Une autre récompense rend nécessaire une nouvelle autorisation pour gagner à nouveau pendant la période de restriction.
 
-L’utilisation d’un bon conserve la prise en charge exclusive par un employé puis la confirmation du rabais alimentaire appliqué. Les essais Preview peuvent consommer le code sans rabais, avec un audit indiquant 0 $ réellement appliqué. Les codes restent à usage unique. Aucun compte ni API Lightspeed n’est intégré. Le budget mensuel configurable, ses deux portées, les émissions manuelles et les dépassements justifiés restent disponibles aux gestionnaires.
+L’utilisation d’un bon conserve la prise en charge exclusive par un employé puis la confirmation du rabais alimentaire appliqué. La consommation technique sans rabais reste isolée et désactivée pour le lancement ; le parcours normal exige la confirmation du rabais réellement appliqué. Les codes restent à usage unique. Aucun compte ni API Lightspeed n’est intégré. Le budget mensuel configurable, ses deux portées, les émissions manuelles et les dépassements justifiés restent disponibles aux gestionnaires.
 
 ## Interventions nécessaires dans Cloudflare — Preview uniquement
 
 1. Créer une D1 **distincte**, `defi-boreal-recompenses-preview`, et y lier `DB` dans **Pages → minijeux → Settings → Bindings → Preview**. Garder Production → `defi-boreal-recompenses`. Une branche Git seule n’isole pas D1 ; les paramètres Preview sont partagés entre branches Preview du projet.
 2. Base Preview vide : appliquer les instructions complètes du [schéma console final](../proposals/sql/preview_schema_development.sql) dans leur ordre. `application_tables` doit être 0 avant tout CREATE ; chaque CREATE TRIGGER…END est une seule instruction. Ne pas utiliser ce fichier sur une base existante.
 3. Si la Preview possède déjà le schéma 0007, appliquer **0008 puis 0009**, chaque fichier dans un seul batch D1 transactionnel. Si elle possède seulement 0001, appliquer 0002 à 0009 dans leur ordre, chaque fichier atomiquement. Ne pas exécuter les DROP/CREATE des mises à niveau séparément sur des données existantes. Aucune migration n’a été appliquée à distance par ce travail.
-4. Configurer les variables Preview ci-dessous, puis redéployer la branche. Ces valeurs sont réservées à la recette autorisée ; aucune configuration Production ne change.
+4. Configurer les variables Preview ci-dessous, puis redéployer la branche. Ces valeurs préparent le lancement sans modifier Production. La validation explicite des conditions reste nécessaire.
 
 | Variable | Valeur Preview |
 |---|---|
 | `APP_ORIGIN` | `https://develop-noel-budget-configur.minijeux-4gy.pages.dev` |
 | `PHONE_VERIFICATION_MODE` | `unverified` |
 | `REWARDS_ENABLED` | `true` |
-| `TERMS_APPROVED` | `true` pour cette recette autorisée |
+| `TERMS_APPROVED` | `false` jusqu’à validation explicite des conditions définitives |
 | `MANUAL_REWARDS_ENABLED` | `true` |
 | `SMS_APPROVED` | `false` |
 | `NOTIFICATION_SMS_ENABLED` | `false` |
 | `SMS_DAILY_LIMIT` | `0` |
 | `DEPLOYMENT_ENVIRONMENT` | `preview` |
-| `PREVIEW_TEST_REDEMPTION` | `true` pour consommer les codes d’essai sans rabais |
+| `PREVIEW_TEST_REDEMPTION` | `false` pour le parcours réel |
 | `REWARDS_HMAC_SECRET` | Secret serveur aléatoire stable de 32 octets minimum |
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET` | Widget du domaine Preview, action `boreal-session` |
 | `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD` | Identifiants de l’application Access du personnel |
@@ -51,7 +55,7 @@ Aucun SID, token ni service Twilio n’est nécessaire. Le code Verify/Messaging
 
 ## Connexion des gestionnaires : configuration unique par l’hébergeur
 
-Dans Cloudflare Zero Trust → Settings → Authentication, activer **One-time PIN** pour la connexion par courriel. Créer une application Access pour les chemins privés de l’alias Preview (`/admin*`, `/v3/admin*`, `/api/admin/*`), autoriser uniquement les courriels du personnel et choisir **Session duration: 24 hours**. Ne pas protéger tout le jeu public par un compte joueur. La même protection côté Worker ferme les autres alias dont la politique ne serait pas configurée.
+Dans Cloudflare Zero Trust → Settings → Authentication, activer **One-time PIN** pour la connexion par courriel. Créer une application Access pour les chemins privés de l’alias Preview (`/admin*`, `/v3/admin*`, `/api/admin/*`), faire vérifier les courriels par One-time PIN et conserver la liste des employés autorisés dans D1 ; choisir **Session duration: 7 days**, avec session globale de **1 mois**, comme détaillé dans le guide actuel. Ne pas protéger tout le jeu public par un compte joueur. La même protection côté Worker ferme les autres alias dont la politique ne serait pas configurée.
 
 Dans la D1 Preview, préautoriser chaque compte par une instruction avec ses véritables coordonnées, sans mettre les courriels réels dans Git :
 

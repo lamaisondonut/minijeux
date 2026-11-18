@@ -88,8 +88,8 @@ async function noHorizontalOverflow(page, label) {
 }
 async function checkModal(page, label, mode, screenshot) {
   const opener = page.locator('#boreal-open-rules');
-  check(/^règlement et récompenses$/i.test((await opener.innerText()).trim()),
-    `${label}: accès explicite au règlement et aux récompenses`);
+  check(/^règlement$/i.test((await opener.innerText()).trim()),
+    `${label}: accès discret et explicite au règlement`);
   check(await opener.getAttribute('aria-controls') === 'boreal-rules', `${label}: bouton relié à la modale`);
   await opener.focus();
   await page.keyboard.press('Enter');
@@ -218,7 +218,7 @@ async function checkModal(page, label, mode, screenshot) {
             `${label}: introduction à gauche et scène de Jacques à droite`);
         }
         const homeText = await page.locator('#home').innerText();
-        check(/une seule récompense par personne tous les 30 jours/i.test(homeText),
+        check(/une (?:seule )?récompense par personne tous les 30 jours/i.test(homeText),
           `${label}: règle d’une récompense par personne visible avant participation`);
         check(await page.locator('#home input, #home textarea, #home select').count() === 0,
           `${label}: aucun renseignement personnel demandé avant la partie`);
@@ -226,6 +226,36 @@ async function checkModal(page, label, mode, screenshot) {
         const expectedHeading = mode === 'rewards' ? /mode récompenses/i :
           mode === 'extreme' ? /défi extrême.*sans récompense/i : /mode libre.*sans récompense/i;
         check(expectedHeading.test(homeText), `${label}: mode réel annoncé avant le départ`);
+        const privacy = page.locator('#boreal-privacy-link');
+        check(await privacy.isVisible() && /politique de confidentialité/i.test(await privacy.innerText()) &&
+          new URL(await privacy.getAttribute('href')).hostname === 'lesborealistes.ca',
+          `${label}: politique de confidentialité du restaurant accessible directement`);
+        const homePrizes = page.locator('#home .boreal-home-prizes');
+        const prizeCards = page.locator('#home .boreal-home-prize');
+        if (mode === 'rewards') {
+          check(/^Joue et remporte ton rabais !$/i.test((await page.locator('#boreal-home-offer').innerText()).replace(/\s+/g,' ').trim()),
+            `${label}: titre promotionnel demandé affiché pour les récompenses proposées`);
+          const prizes = await prizeCards.allInnerTexts();
+          check(await homePrizes.isVisible() && prizes.length === 3 &&
+            /5\s*\$/.test(prizes[0]) && /5[\s\u00a0\u202f]?000/.test(prizes[0]) &&
+            /10\s*\$/.test(prizes[1]) && /7[\s\u00a0\u202f]?500/.test(prizes[1]) &&
+            /20\s*\$/.test(prizes[2]) && /10[\s\u00a0\u202f]?000/.test(prizes[2]),
+            `${label}: trois encadrés présentent les montants et scores exacts`);
+          check(await prizeCards.filter({has:page.locator('strong')}).count() === 3 &&
+            await prizeCards.locator('strong').evaluateAll(nodes => nodes.every(node => parseFloat(getComputedStyle(node).fontSize) >= 24)),
+            `${label}: montants des trois encadrés mis en valeur`);
+          check(await page.locator('#home .boreal-home-prize.unavailable').count() === 1 &&
+            /non proposé/i.test(await prizeCards.last().innerText()),
+            `${label}: palier supérieur indisponible clairement indiqué sans fausse promesse`);
+          const conditions = await page.locator('#boreal-home-conditions > li').allInnerTexts();
+          check(conditions.length === 4 && /code unique valide 30 jours/i.test(conditions[0]) &&
+            /une (?:seule )?récompense par personne tous les 30 jours/i.test(conditions[1]) &&
+            /aliments seulement/i.test(conditions[2]) && /quantités? limitées?/i.test(conditions[3]),
+            `${label}: quatre conditions essentielles courtes avant participation`);
+        } else {
+          check(!await homePrizes.isVisible() && !/JOUE ET REMPORTE TON RABAIS/i.test(homeText),
+            `${label}: aucun encadré ni promesse de gain lorsque les récompenses sont indisponibles`);
+        }
         await page.screenshot({path:path.join(artifactDir, `home-${device}-${mode}.png`)});
         measurements.push({viewport,mode,shell,copy,scene,tips,start});
         await checkModal(page, label, mode, mode === 'rewards' ? device : null);

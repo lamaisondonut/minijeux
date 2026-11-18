@@ -41,6 +41,14 @@ async function mockApi(page, options = {}) {
     if (endpoint === '/me') return send(route, options.meStatus || 200, options.meStatus ? { error: 'test', message: 'Accès indisponible pour ce test.' } : { employee,previewTestRedemption:options.previewTestRedemption===true,phoneVerificationMode:options.phoneVerificationMode||'unverified',notificationSmsEnabled:options.notificationSmsEnabled===true });
     if (endpoint === '/identity') return send(route, 200, { sub: employee.sub, email: employee.email });
     if (endpoint === '/budget') return send(route, 200, options.budgetRecord?.value || options.budget || budget);
+    if (endpoint === '/dashboard') {
+      const rows=options.rows||[record.reward],count=status=>rows.filter(row=>row.status===status).length;
+      const tiers=[500,1000,2000].map(valueCents=>({valueCents,count:rows.filter(row=>row.valueCents===valueCents).length}));
+      const total={registeredPlayers:new Set(rows.map(row=>row.phone)).size,recordedGames:options.recordedGames??rows.length,rewardsCount:rows.length,usedCount:count('issued'),activeCount:count('pending')+count('claimed'),expiredCount:count('expired'),valueCents:rows.reduce((sum,row)=>sum+row.valueCents,0)};
+      const month={month:'2026-11',usedValueCents:rows.filter(row=>row.status==='issued').reduce((sum,row)=>sum+row.valueCents,0),appliedValueCents:rows.reduce((sum,row)=>sum+(row.appliedValueCents||0),0),expiredValueCents:rows.filter(row=>row.status==='expired').reduce((sum,row)=>sum+row.valueCents,0),tiers};
+      return send(route,200,options.dashboard||{totals:total,month,tiers,budget:options.budgetRecord?.value||options.budget||budget,coverage:{gamesComplete:false,note:'Seuls les joueurs ayant une récompense sont enregistrés. Les parties libres ne sont pas enregistrées ; les statistiques portent sur les données conservées.'}});
+    }
+    if (endpoint === '/employees') return send(route,200,{employees:options.employees||[{...employee,active:true}]});
     if (endpoint === '/rewards') {
       let rows = options.rows || [record.reward];
       const code = url.searchParams.get('code');
@@ -95,6 +103,11 @@ async function main() {
         await mockApi(page);
         await openReward(page, origin);
         await page.locator('#budget-remaining').filter({ hasText: '80,00' }).waitFor();
+        await page.locator('#overview-rewards').filter({hasText:'1'}).waitFor();
+        assert.equal(await page.locator('#overview-players').innerText(),'1');
+        assert.match(await page.locator('#overview-value').innerText(),/10,00/);
+        assert.match(await page.locator('#overview-coverage').innerText(),/parties libres ne sont pas enregistrées/);
+        assert.equal(await page.locator('#overview-tiers>div').count(),3);
         assert.match(await page.locator('#budget-total').innerText(), /100,00/);
         assert.match(await page.locator('#budget-used').innerText(), /10,00/);
         assert.equal(await page.locator('#budget-pending').innerText(), '1');
@@ -146,6 +159,9 @@ async function main() {
       assert.equal(await page.locator('#budget-used-count').innerText(), '0');
       assert.equal(await page.locator('#budget-reserved').isVisible(), false);
       assert.equal(await page.locator('.reward-row').count(), 0);
+      await page.locator('#overview-rewards').filter({hasText:'0'}).waitFor();
+      assert.equal(await page.locator('#overview-players').innerText(),'0');
+      assert.match(await page.locator('#overview-value').innerText(),/0,00/);
       await page.locator('#list-state').filter({ hasText: 'Aucun gagnant à afficher pour le moment.' }).waitFor();
       await page.close();
     });
@@ -208,7 +224,7 @@ async function main() {
     await test('service failures, empty search, filters, and audit failure have clear states', async () => {
       const offline = await browser.newPage(); await mockApi(offline, { meStatus: 503 });
       await offline.goto(origin + '/admin/');
-      await offline.locator('#access-title').filter({ hasText: 'momentanément indisponible' }).waitFor();
+      await offline.locator('#access-title').filter({ hasText: 'Accès au registre indisponible' }).waitFor();
       assert.equal(await offline.locator('#access-retry').isVisible(), true); await offline.close();
       const page = await browser.newPage(); let failList = true;
       await mockApi(page, { intercept: async ({ endpoint, route, send }) => {
@@ -431,16 +447,16 @@ async function main() {
       assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),'manual issuance overflows 320px');
       await page.screenshot({path:path.join(artifacts,'admin-manual-food-320.png'),fullPage:true});await page.close();
     });
-    await test('Preview consumption explicitly records no invoice discount and needs no food value',async()=>{
+    await test('standard staff flow never exposes test consumption even when technical metadata is present',async()=>{
       const page=await browser.newPage(),calls=[];
       const reward=fixture({status:'claimed',claimedBy:employeeA.sub,claimedByName:employeeA.name});
-      await mockApi(page,{previewTestRedemption:true,record:{reward,claims:0,uses:0},intercept:async({endpoint,request,route,send})=>{
-        if(!endpoint.endsWith('/use'))return false;calls.push(request.postDataJSON());await send(route,200,{reward:{...reward,status:'issued',issuedBy:employeeA.sub,previewTestConsumed:true,discountApplied:false}});return true;
-      }});
-      await openReward(page,origin);assert.equal(await page.locator('#eligible-food-amount').count(),0);
-      assert.match(await page.locator('#use-form').innerText(),/aucun rabais dans Lightspeed/);
-      await page.locator('#discount-confirm').check();await page.locator('#use-confirm').click();await page.locator('#notification').filter({hasText:'Code consommé pour l’essai Preview'}).waitFor();
-      assert.deepEqual(calls,[{previewTestConsumed:true}]);await page.close();
+      await mockApi(page,{previewTestRedemption:true,record:{reward,claims:0,uses:0},intercept:async({endpoint,request})=>{if(endpoint.endsWith('/use'))calls.push(request.postDataJSON());return false;}});
+      await openReward(page,origin);assert.equal(await page.locator('#eligible-food-amount').count(),1);
+      assert.doesNotMatch(await page.locator('#use-form').innerText(),/Preview|essai|simulation/i);
+      await page.locator('#discount-confirm').check();await page.locator('#use-confirm').click();assert.equal(calls.length,0);
+      await page.locator('#eligible-food-amount').fill('10');await page.locator('#food-only-confirm').check();await page.locator('#use-confirm').click();
+      await page.locator('#notification').filter({hasText:'L’application du rabais sur la facture est enregistrée'}).waitFor();
+      assert.deepEqual(calls,[{discountApplied:true,foodOnlyConfirmed:true,eligibleFoodCents:1000}]);await page.close();
     });
     await test('name and declared phone search finds every customer reward, with no SMS action at launch',async()=>{
       const page=await browser.newPage({viewport:{width:390,height:844}}),searches=[];
@@ -471,6 +487,48 @@ async function main() {
       await openReward(page,origin);await page.locator('#unlock-confirm').waitFor();assert.match(await page.locator('#eligibility-section').innerText(),/Doublon potentiel/);
       await page.locator('#unlock-confirm').click();assert.equal(calls.length,0);await page.locator('#unlock-scope').selectOption('device');await page.locator('#unlock-reason').fill('Appareil partagé au restaurant');await page.locator('#unlock-confirm').click();
       await page.locator('#notification').filter({hasText:'Déblocage exceptionnel enregistré'}).waitFor();await page.locator('#eligibility-section').filter({hasText:'déblocage autorisé'}).waitFor();assert.equal(calls.length,1);assert.equal(calls[0].scope,'device');assert.equal(calls[0].reason,'Appareil partagé au restaurant');await page.close();
+    });
+    await test('failed dashboard never fabricates statistics and refresh recovers real values',async()=>{
+      const page=await browser.newPage();let offline=true;
+      await mockApi(page,{intercept:async({endpoint,route,send})=>{if(endpoint==='/dashboard'&&offline){await send(route,503,{error:'service_unavailable'});return true;}return false;}});
+      await page.goto(origin+'/admin/');await page.locator('#overview-error').waitFor();
+      assert.equal(await page.locator('#overview-rewards').innerText(),'—');assert.equal(await page.locator('#overview-value').innerText(),'—');
+      assert.match(await page.locator('#overview-coverage').innerText(),/Aucun chiffre estimé/);
+      offline=false;await page.locator('#overview-refresh').click();await page.locator('#overview-rewards').filter({hasText:'1'}).waitFor();assert.equal(await page.locator('#overview-error').isVisible(),false);await page.close();
+    });
+    await test('manager can authorize, disable and reactivate staff while own account stays protected',async()=>{
+      const page=await browser.newPage({viewport:{width:390,height:844}}),calls=[],employees=[{...employeeB,active:true}];
+      await mockApi(page,{employee:employeeB,audit:[{action:'employee_created',actorName:employeeB.name,createdAt:'2026-11-14T14:00:00Z',details:{email:'service@example.test',name:'Employé autorisé'}}],intercept:async({endpoint,request,route,send})=>{
+        if(endpoint!=='/employees')return false;
+        if(request.method()==='POST'){const body=request.postDataJSON();calls.push(body);assert.equal(body.role,'staff');employees.push({sub:'invite:'+body.email,...body,active:true});await send(route,201,{employee:employees.at(-1)});return true;}
+        if(request.method()==='PATCH'){const body=request.postDataJSON();calls.push(body);const target=employees.find(item=>item.sub===body.sub);target.active=body.active;await send(route,200,{employee:target});return true;}
+        await send(route,200,{employees});return true;
+      }});
+      await page.goto(origin+'/admin/');await page.locator('#employees-panel').waitFor();await page.locator('#employees-panel summary').click();
+      assert.equal(await page.getByText('Votre compte',{exact:true}).count(),1);assert.equal(await page.locator('#employee-list button').count(),0);
+      await page.locator('#operations-panel summary').click();await page.locator('#operations-list').filter({hasText:'Employé autorisé'}).waitFor();assert.match(await page.locator('#operations-panel').innerText(),/200 dernières opérations/);assert.match(await page.locator('#operations-list').innerText(),/Benoît Test/);assert.match(await page.locator('#operations-list').innerText(),/service@example.test/);
+      await page.locator('#employee-add-name').fill('Employé autorisé');await page.locator('#employee-add-email').fill('service@example.test');await page.locator('#employee-add-confirm').click();
+      await page.locator('#employee-list').filter({hasText:'service@example.test'}).waitFor();assert.equal(calls.length,1);
+      await page.getByRole('button',{name:'Désactiver',exact:true}).click();await page.locator('#employee-confirm').click();await page.getByRole('button',{name:'Réactiver',exact:true}).waitFor();assert.equal(calls[1].active,false);
+      await page.getByRole('button',{name:'Réactiver',exact:true}).click();await page.locator('#employee-confirm').click();await page.getByRole('button',{name:'Désactiver',exact:true}).waitFor();assert.equal(calls[2].active,true);
+      assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await page.screenshot({path:path.join(artifacts,'admin-employees-390.png'),fullPage:true});await page.close();
+      const staff=await browser.newPage();await mockApi(staff);await staff.goto(origin+'/admin/');await staff.locator('.reward-row').waitFor();assert.equal(await staff.locator('#employees-panel').isVisible(),false);assert.equal(await staff.locator('#operations-panel').isVisible(),false);assert.equal(await staff.locator('#manual-reward-panel').count(),0);await staff.close();
+    });
+    await test('retry establishes manager tools; expiry clears pending staff operations and stale private data',async()=>{
+      const page=await browser.newPage();let unavailable=true,role=employeeB,expire=false,staffWriteStarted=false;const staffWriteGate=deferred();
+      await mockApi(page,{employee:employeeB,intercept:async({endpoint,request,route,send})=>{
+        if(endpoint==='/me'){await send(route,unavailable?503:200,unavailable?{error:'admin_unavailable'}:{employee:role});return true;}
+        if(endpoint==='/employees'&&request.method()==='POST'){staffWriteStarted=true;await staffWriteGate.promise;await send(route,201,{employee:{sub:'invite:private@example.test',email:'private@example.test',name:'Ancienne saisie',active:true,role:'staff'}});return true;}
+        if(endpoint==='/rewards'&&expire){await send(route,401,{error:'unauthorized'});return true;}return false;
+      }});
+      await page.goto(origin+'/admin/');await page.locator('#access-retry').waitFor();assert.equal(await page.locator('#manual-reward-panel').count(),0);
+      unavailable=false;await page.locator('#access-retry').click();await page.locator('#manual-reward-panel').waitFor();
+      await page.locator('#manual-reward-panel input[name=firstName]').fill('Donnée privée');await page.locator('#employees-panel summary').click();await page.locator('#employee-add-name').fill('Ancienne saisie');await page.locator('#employee-add-email').fill('private@example.test');await page.locator('#employee-add-confirm').click();
+      await page.waitForFunction(()=>document.getElementById('employee-add-confirm').disabled);assert.equal(staffWriteStarted,true);expire=true;
+      await page.locator('#refresh-button').click();await page.locator('#access-title').filter({hasText:'Connectez-vous'}).waitFor();assert.equal(await page.locator('#manual-reward-panel').count(),0);assert.equal(await page.locator('#employee-add-email').inputValue(),'');assert.equal(await page.locator('#employee-list').innerText(),'');assert.equal(await page.locator('#overview-rewards').innerText(),'—');
+      expire=false;await page.evaluate(()=>window.dispatchEvent(new PageTransitionEvent('pageshow',{persisted:true})));await page.locator('#manual-reward-panel').waitFor();await page.locator('#employees-panel summary').click();assert.equal(await page.locator('#employee-add-confirm').isEnabled(),true);assert.equal(await page.locator('#employee-add-email').isEnabled(),true);assert.equal(await page.locator('#employee-add-email').inputValue(),'');
+      staffWriteGate.resolve();await page.waitForTimeout(40);assert.doesNotMatch(await page.locator('#employee-list').innerText(),/private@example.test|Ancienne saisie/);
+      role=employeeA;await page.evaluate(()=>window.dispatchEvent(new PageTransitionEvent('pageshow',{persisted:true})));await page.locator('.reward-row').waitFor();assert.equal(await page.locator('#manual-reward-panel').count(),0);assert.equal(await page.locator('#employees-panel').isVisible(),false);await page.close();
     });
     process.stdout.write(checks + ' admin browser checks passed. Screenshots: ' + artifacts + '\n');
   } finally { await browser.close(); await new Promise((resolve) => server.close(resolve)); }

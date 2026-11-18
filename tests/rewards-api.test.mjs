@@ -185,6 +185,54 @@ test("write requests enforce origin, fetch metadata, content type and 128KiB str
   assert.equal((await api(env, "/api/games/start", {}, { "Content-Type": "application/jsonbad" })).status, 415);
   assert.equal((await api(env, "/api/games/start", '{"x":"' + "x".repeat(131072) + '"}')).status, 413);
 });
+test('dashboard counts real records only and employee management remains restricted to active managers', async () => {
+  const env = environment();
+  const headers = {'Cf-Access-Jwt-Assertion':await jwt()};
+  assert.equal((await api(env, '/api/admin/dashboard')).status, 401);
+  assert.equal((await api(env, '/api/admin/employees')).status, 401);
+  assert.equal((await api(env, '/api/admin/dashboard', undefined, headers)).status, 403);
+  env.DB.sqlite.prepare("INSERT INTO employees(sub,email,name,role) VALUES('alice','alice@example.com','Alice','staff')").run();
+  const dashboardResponse = await api(env, '/api/admin/dashboard', undefined, headers);
+  assert.equal(dashboardResponse.status, 200);
+  assert.equal(dashboardResponse.headers.get('Cache-Control'), 'no-store');
+  const dashboard = await dashboardResponse.json();
+  assert.equal(dashboard.totals.registeredPlayers, 0);
+  assert.equal(dashboard.totals.recordedGames, 0);
+  assert.equal(dashboard.budget.budgetCents, 10000);
+  assert.equal(dashboard.coverage.gamesComplete, false);
+  assert.equal((await api(env, '/api/admin/employees', undefined, headers)).status, 403);
+  assert.equal((await api(env, '/api/admin/employees', {email:'staff@example.invalid',name:'Personnel',role:'staff'}, headers)).status, 403);
+  assert.equal(env.DB.sqlite.prepare('SELECT COUNT(*) n FROM employees').get().n, 1);
+  assert.equal(sent, 0);
+});
+test('manager creates and revokes a staff invitation through authenticated CSRF-protected routes', async () => {
+  const env = environment();
+  env.DB.sqlite.prepare("INSERT INTO employees(sub,email,name,role) VALUES('alice','alice@example.com','Alice','manager')").run();
+  const headers = {'Cf-Access-Jwt-Assertion':await jwt()};
+  const body = {email:'Personne@Example.Invalid',name:'Personnel du restaurant',role:'staff'};
+  assert.equal((await api(env, '/api/admin/employees', body, {...headers,Origin:'https://evil.example'})).status, 403);
+  assert.equal((await api(env, '/api/admin/employees', {...body,role:'manager'}, headers)).status, 400);
+  const created = await api(env, '/api/admin/employees', body, headers);
+  assert.equal(created.status, 200);
+  const invited = (await created.json()).employee;
+  assert.equal(invited.sub, 'invite:personne@example.invalid');
+  assert.equal(invited.active, true);
+  assert.equal(invited.role, 'staff');
+  assert.equal((await (await api(env, '/api/admin/employees', undefined, headers)).json()).employees.length, 2);
+  const deactivate = await handleRequest(new Request(env.APP_ORIGIN+'/api/admin/employees', {
+    method:'PATCH',headers:{...headers,Origin:env.APP_ORIGIN,'Content-Type':'application/json'},
+    body:JSON.stringify({sub:invited.sub,active:false}),
+  }), env);
+  assert.equal(deactivate.status, 200);
+  assert.equal((await deactivate.json()).employee.active, false);
+  const revokedHeaders = {'Cf-Access-Jwt-Assertion':await jwt(invited.sub,invited.email)};
+  assert.equal((await api(env, '/api/admin/dashboard', undefined, revokedHeaders)).status, 403);
+  assert.equal(env.DB.sqlite.prepare("SELECT COUNT(*) n FROM audit WHERE action='employee_created'").get().n, 1);
+  assert.equal(env.DB.sqlite.prepare("SELECT COUNT(*) n FROM audit WHERE action='employee_deactivated'").get().n, 1);
+  env.DB.sqlite.prepare("UPDATE employees SET active=0 WHERE sub='alice'").run();
+  assert.equal((await api(env, '/api/admin/employees', undefined, headers)).status, 403);
+  assert.equal(sent, 0);
+});
 test("start reserves announced cap, requires real Turnstile, binds secure owner and resolves mode changes", async () => {
   const env = environment();
   turnstileGood = false;

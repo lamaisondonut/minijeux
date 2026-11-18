@@ -12,6 +12,8 @@ import { phoneVerificationMode } from "./launch-mode.mjs";
 import { customerColumns,adminCustomerView,normalizeNameSearch } from "./customer.mjs";
 import { notificationConfigured } from "./notification-sms.mjs";
 import { getBudget, changeBudget } from "./budget.mjs";
+import { getDashboard } from "./dashboard.mjs";
+import { listEmployees, createEmployee, changeEmployee } from "./employees.mjs";
 async function notifyInitial(env,reward,phone,actor) {
   if(phoneVerificationMode(env)!=="sms")return {status:"disabled"};
   try {return await sendRewardSms(env,{reward,phone,actor,requestId:'initial_'+reward.id,kind:'initial'});}
@@ -279,6 +281,17 @@ async function adminApi(request, env, path, body, now, url) {
   }
   await adminRate(request, env, employee, path, now);
   if (path === "/api/admin/me" && request.method === "GET") return json({ employee: { ...employee, subject: employee.sub },previewTestRedemption:previewTestRedemption(env),phoneVerificationMode:phoneVerificationMode(env),notificationSmsEnabled:phoneVerificationMode(env)==="sms"&&notificationConfigured(env) });
+  if (path === "/api/admin/dashboard" && request.method === "GET") {
+    if (!await rewardDatabaseReady(env.DB)) throw new ApiError(503, "schema_unavailable");
+    await cleanup(env.DB, now);
+    return json(await getDashboard(env.DB, now));
+  }
+  if (path === "/api/admin/employees") {
+    if (request.method === "GET") return json(await listEmployees(env.DB, employee));
+    if (request.method === "POST") return json(await createEmployee(env.DB, employee, body, now));
+    if (request.method === "PATCH") return json(await changeEmployee(env.DB, employee, body, now));
+    throw new ApiError(405, "method_not_allowed");
+  }
   if (path === "/api/admin/budget" && request.method === "GET") {
     await cleanup(env.DB, now);
     const { month } = monthWindow(now);

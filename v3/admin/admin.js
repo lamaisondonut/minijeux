@@ -37,6 +37,7 @@
   function serviceError(status, code) {
     if (status === 429) return 'Trop de tentatives. Patientez un moment avant de réessayer.';
     const messages = {
+      admin_unavailable: 'L’espace employés est indisponible. Faites vérifier la connexion sécurisée et le registre par le responsable de l’hébergement, puis réessayez.',
       reward_not_found: 'CODE INTROUVABLE. Vérifiez le code présenté par le client.',
       reward_conflict: 'Ce code a déjà été utilisé, est expiré ou a changé de statut. Actualisez sa fiche.',
       discount_confirmation_required: 'Confirmez que le rabais a été appliqué sur la facture.',
@@ -75,6 +76,7 @@
   function showAccess(status, message) {
     state.session += 1;
     state.employee = null;
+    document.dispatchEvent(new CustomEvent('boreal:admin-session', { detail: { employee: null, session: state.session } }));
     state.rewards = [];
     state.selected = null;
     state.cursor = null;
@@ -115,13 +117,15 @@
           if (parts.length) { $('access-identity').textContent = 'Compte à transmettre au responsable : ' + parts.join(' · '); $('access-identity').hidden = false; }
         }).catch(() => {});
     } else {
-      $('access-title').textContent = 'Connexion momentanément indisponible';
+      $('access-title').textContent = status === 503 ? 'Accès au registre indisponible' : 'Connexion momentanément indisponible';
       $('access-message').textContent = message || 'Le service ne répond pas. Aucune récompense ne peut être traitée pour le moment.';
     }
   }
 
   async function boot() {
     const session = ++state.session;
+    state.employee = null;
+    document.dispatchEvent(new CustomEvent('boreal:admin-session', { detail: { employee: null, session } }));
     $('access-title').textContent = 'Vérification de votre accès…';
     $('access-message').textContent = 'Veuillez patienter pendant la connexion à votre compte individuel.';
     $('access-login').hidden = true;
@@ -131,13 +135,14 @@
       const data = await api('/me');
       if (session !== state.session) return;
       if (!data.employee || !(data.employee.sub || data.employee.subject)) throw new ApiError('Votre compte doit être vérifié par votre responsable.');
-      state.employee = data.employee;state.employee.previewTestRedemption=data.previewTestRedemption===true;state.employee.phoneVerificationMode=data.phoneVerificationMode==='sms'?'sms':'unverified';state.employee.notificationSmsEnabled=data.notificationSmsEnabled===true;
+      state.employee = data.employee;state.employee.phoneVerificationMode=data.phoneVerificationMode==='sms'?'sms':'unverified';state.employee.notificationSmsEnabled=data.notificationSmsEnabled===true;
       $('employee-name').textContent = data.employee.name || data.employee.email || 'Compte employé';
       $('access-panel').hidden = true;
       $('admin-content').hidden = false;
       clearNotice();
+      document.dispatchEvent(new CustomEvent('boreal:admin-session', { detail: { employee: state.employee, session } }));
       await Promise.allSettled([loadRewards(), loadBudget()]);
-    } catch (error) { if (error.status !== 401 && error.status !== 403) showAccess(0, error.message); }
+    } catch (error) { if (error.status !== 401 && error.status !== 403) showAccess(error.status === 503 ? 503 : 0, error.message); }
   }
 
   function validBudget(data) {
@@ -238,6 +243,7 @@
       $('budget-dialog').close();
       showNotice('Budget enregistré pour ' + budgetMonth(operation.month) + ' : ' + amount(operation.budgetCents) + (operation.scope === 'current_and_future' ? ', ainsi que pour les mois suivants.' : '. Les mois suivants conservent leur budget par défaut.'));
       await loadBudget();
+      document.dispatchEvent(new Event('boreal:admin-data-changed'));
     } catch (error) {
       if (session !== state.session) return;
       $('budget-dialog').close();
@@ -410,7 +416,6 @@
       const preview=node('p','','Indiquez la portion alimentaire avant d’appliquer le rabais dans Lightspeed.');
       foodInput.addEventListener('input',()=>{const cents=moneyInput(foodInput.value);preview.textContent=cents>0?'Rabais à appliquer : '+amount(Math.min(cents,reward.valueCents))+'. Portion inutilisée perdue : '+amount(Math.max(0,reward.valueCents-cents))+'.':'Facture sans aliments admissibles : aucun rabais possible.';});
       form.append(foodLabel,preview,foodConfirmLabel,checkLabel, error, submit);
-      if(state.employee.previewTestRedemption){foodInput.required=false;foodCheck.required=false;checkbox.required=false;form.replaceChildren(node('p','','Essai Preview : aucun rabais dans Lightspeed. La consommation définitive du code sera enregistrée comme un essai, sans attestation de rabais appliqué.'),checkLabel,error,submit);checkLabel.querySelector('span').textContent='Je confirme la consommation de ce code pour l’essai Preview, sans appliquer de rabais.';checkbox.required=true;}
       form.addEventListener('submit', confirmUse);
       block.append(form);
     } else if (reward.status === 'claimed') {
@@ -465,7 +470,7 @@
       if (request !== state.auditRequest || session !== state.session || !state.selected || reward.id !== state.selected.id) return;
       const events = data.events || data.audit;
       if (!Array.isArray(events)) throw new ApiError('Historique incomplet.');
-      const actionLabels = { claimed: 'Code pris en charge', claim: 'Code pris en charge', reward_claimed: 'Code pris en charge', issued: 'Utilisation enregistrée', issue: 'Utilisation enregistrée', reward_issued: 'Utilisation enregistrée', used: 'Rabais appliqué sur la facture', discount_applied: 'Rabais appliqué sur la facture', confirmed: 'Récompense attribuée', reward_confirmed: 'Récompense attribuée', preview_test_used:'Code consommé pour essai Preview, aucun rabais appliqué', duplicate_detected:'Tentative répétée signalée',manager_exception_granted:'Déblocage exceptionnel autorisé',manager_exception_consumed:'Exception utilisée pour un nouveau gain', manual_confirmed:'Bon créé manuellement', reward_sms_requested:'SMS demandé', reward_sms_result:'Résultat de la demande SMS', cancelled: 'Récompense annulée', cancel: 'Récompense annulée', reward_cancelled: 'Récompense annulée' };
+      const actionLabels = { claimed: 'Code pris en charge', claim: 'Code pris en charge', reward_claimed: 'Code pris en charge', issued: 'Utilisation enregistrée', issue: 'Utilisation enregistrée', reward_issued: 'Utilisation enregistrée', used: 'Rabais appliqué sur la facture', discount_applied: 'Rabais appliqué sur la facture', confirmed: 'Récompense attribuée', reward_confirmed: 'Récompense attribuée', preview_test_used:'Ancienne consommation technique sans rabais appliqué', duplicate_detected:'Tentative répétée signalée',manager_exception_granted:'Déblocage exceptionnel autorisé',manager_exception_consumed:'Exception utilisée pour un nouveau gain', manual_confirmed:'Bon créé manuellement', reward_sms_requested:'SMS demandé', reward_sms_result:'Résultat de la demande SMS', cancelled: 'Récompense annulée', cancel: 'Récompense annulée', reward_cancelled: 'Récompense annulée' };
       for (const event of events) {
         const item = node('li');
         const action = event.action === 'issued' && (event.details?.discountApplied === true || reward.discountApplied === true) ? 'Rabais appliqué sur la facture' : actionLabels[event.action] || 'Mise à jour de la récompense';
@@ -528,6 +533,7 @@
       if (updated.status !== 'claimed' || !ownClaim(updated)) throw new ApiError('La prise en charge à votre nom n’a pas été confirmée. Actualisez la fiche avant d’appliquer le rabais.');
       if (updated.id !== reward.id) throw new ApiError('La confirmation ne correspond pas au code choisi. Actualisez la fiche avant d’appliquer le rabais.');
       updateReward(updated);
+      document.dispatchEvent(new Event('boreal:admin-data-changed'));
       $('claim-dialog').close();
       showNotice('Code pris en charge à votre nom. Appliquez manuellement le rabais sur la facture, puis confirmez son application.');
       await Promise.allSettled([loadBudget(), loadAudit(), loadRewards()]);
@@ -556,20 +562,21 @@
     const reward = state.selected;
     const form = event.currentTarget;
     if (state.busy || !reward || reward.status !== 'claimed' || !ownClaim(reward) || !form.reportValidity()) return;
-    const testOnly=state.employee.previewTestRedemption===true;const eligibleFoodCents=testOnly?null:moneyInput($('eligible-food-amount').value);if(!testOnly&&(!Number.isSafeInteger(eligibleFoodCents)||eligibleFoodCents<=0)){$('use-error').textContent='Saisissez une portion alimentaire admissible positive.';$('use-error').hidden=false;return;}
+    const eligibleFoodCents=moneyInput($('eligible-food-amount').value);if(!Number.isSafeInteger(eligibleFoodCents)||eligibleFoodCents<=0){$('use-error').textContent='Saisissez une portion alimentaire admissible positive.';$('use-error').hidden=false;return;}
     const session = state.session;
     state.busy = true;
     for (const control of form.elements) control.disabled = true;
     $('use-confirm').textContent = 'Enregistrement en cours…';
     $('use-error').hidden = true;
     try {
-      const data = await api('/rewards/' + encodeURIComponent(reward.id) + '/use', { method: 'POST', body: JSON.stringify(testOnly?{previewTestConsumed:true}:{ discountApplied: true, foodOnlyConfirmed:true, eligibleFoodCents }) });
+      const data = await api('/rewards/' + encodeURIComponent(reward.id) + '/use', { method: 'POST', body: JSON.stringify({ discountApplied: true, foodOnlyConfirmed:true, eligibleFoodCents }) });
       if (session !== state.session || !state.employee) return;
       const updated = data.reward || data;
-      if (updated.status !== 'issued' || (testOnly?updated.previewTestConsumed!==true:(updated.discountApplied !== true || updated.foodOnlyConfirmed !== true || updated.appliedValueCents !== Math.min(reward.valueCents,eligibleFoodCents))) || updated.issuedBy !== subject()) throw new ApiError('L’application du rabais n’a pas été confirmée. Vérifiez le statut avant toute nouvelle action.');
+      if (updated.status !== 'issued' || (updated.discountApplied !== true || updated.foodOnlyConfirmed !== true || updated.appliedValueCents !== Math.min(reward.valueCents,eligibleFoodCents)) || updated.issuedBy !== subject()) throw new ApiError('L’application du rabais n’a pas été confirmée. Vérifiez le statut avant toute nouvelle action.');
       if (updated.id !== reward.id) throw new ApiError('La confirmation ne correspond pas au code choisi. Actualisez la fiche avant toute nouvelle action.');
       updateReward(updated);
-      showNotice(testOnly?'Code consommé pour l’essai Preview. Aucun rabais appliqué dans Lightspeed.': 'L’application du rabais sur la facture est enregistrée. Ce code ne peut plus être utilisé.');
+      document.dispatchEvent(new Event('boreal:admin-data-changed'));
+      showNotice('L’application du rabais sur la facture est enregistrée. Ce code ne peut plus être utilisé.');
       await Promise.allSettled([loadBudget(), loadAudit(), loadRewards()]);
     } catch (error) {
       if (session !== state.session) return;
@@ -622,6 +629,8 @@
     }
   }
 
+  document.addEventListener('boreal:admin-session-request', () => document.dispatchEvent(new CustomEvent('boreal:admin-session', { detail: { employee: state.employee, session: state.session } })));
+  document.addEventListener('boreal:admin-expired', event => showAccess(event.detail?.status === 403 ? 403 : 401));
   $('access-retry').addEventListener('click', boot);
   $('search-form').addEventListener('submit', (event) => {
     event.preventDefault();
@@ -639,7 +648,7 @@
       loadRewards();
     }
   });
-  $('refresh-button').addEventListener('click', () => { if (!state.busy) { clearNotice(); const selected = state.selected; Promise.allSettled([loadRewards(), loadBudget(), refreshSelected(selected)]); } });
+  $('refresh-button').addEventListener('click', () => { if (!state.busy) { clearNotice(); const selected = state.selected; document.dispatchEvent(new Event('boreal:admin-data-changed')); Promise.allSettled([loadRewards(), loadBudget(), refreshSelected(selected)]); } });
   $('load-more').addEventListener('click', () => loadRewards(true));
   $('export-button').addEventListener('click', exportCsv);
   $('close-detail').addEventListener('click', () => { if (!state.busy) { state.selected = null; state.auditRequest += 1; renderRewards(); renderDetail(); } });
@@ -658,6 +667,7 @@
   window.addEventListener('pagehide', () => {
     state.session += 1;
     state.employee = null; state.selected = null; state.rewards = [];
+    document.dispatchEvent(new CustomEvent('boreal:admin-session', { detail: { employee: null, session: state.session } }));
     state.budget = null; state.budgetDraft = null; state.budgetOperation = null; state.budgetRequest += 1;
     $('budget-editor').hidden = true;
     if ($('budget-dialog').open) $('budget-dialog').close();

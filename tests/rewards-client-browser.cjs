@@ -122,6 +122,7 @@ async function rulesText(page){
   {
    const test=await open(browser,{name:'unavailable availability service',statusCode:503,status:{error:'configuration_pending',message:'SQL server phase HMAC'}}),{page}=test;
    check((await page.locator('#boreal-home-mode').innerText()).includes('Mode libre — sans récompense')&&await page.locator('.boreal-reward-tiers').count()===0,'unavailable status offers free play without inventing reward availability');
+   check(!await page.locator('#home .boreal-home-prizes').isVisible()&&!/joue et remporte ton rabais/i.test(await page.locator('#home').innerText()),'unavailable service never promotes a discount that cannot be earned');
    await page.click('#start');
    check(await page.evaluate(()=>rewardsTest.state().mode==='playing')&&test.requests.every(r=>r.pathname==='/api/rewards/status'),'unavailable status starts only ordinary play without financial or SMS requests');
    await test.close();
@@ -162,6 +163,7 @@ async function rulesText(page){
     if(pathname==='/api/games/start'){startBody=body;return{body:{sessionId:'mode-changed',seed:1,mode:'extreme',engineVersion:ENGINE_VERSION,capCents:0,expiresAt:new Date(Date.now()+1800000).toISOString(),policyVersion:'test-policy',requiresModeConfirmation:true}}}
     if(pathname==='/api/games/finish'){const result=replayGame({seed:1,width:startBody.width,height:startBody.height,mode:'extreme',...body});return{body:{score:result.score,eligible:false,mode:'extreme',capCents:0}}}
    }}),{page}=test;
+   check(await page.locator('#home .boreal-home-prize').count()===3&&await page.locator('#home .boreal-home-prize.unavailable').count()===1,'home reward cards preserve the server-announced cap before a run');
    await page.locator('#boreal-open-rules').click();
    check(await page.locator('.boreal-reward-tiers span').count()===3&&await page.locator('.boreal-reward-tiers .unavailable').count()===1&&await page.locator('.boreal-reward-tiers').isVisible(),'reward details disable the higher unoffered tier above the announced cap');
    await page.keyboard.press('Escape');

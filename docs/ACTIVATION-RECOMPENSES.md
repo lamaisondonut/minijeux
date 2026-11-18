@@ -1,3 +1,5 @@
+**Configuration finale actuelle : [MISE-EN-SERVICE.md](MISE-EN-SERVICE.md).** Les conditions ne sont pas approuvées automatiquement ; la consommation technique d’essai doit rester désactivée.
+
 # Lancement et tests immédiats — sans SMS
 
 La procédure actuelle est [LANCEMENT-SANS-SMS.md](LANCEMENT-SANS-SMS.md). Elle remplace le parcours Twilio pour le lancement.
